@@ -8,6 +8,8 @@ All dates in this document are approximate.
 
 ## Changes
 
+20260112: SAME70Q21 MCU DWT FIX; TMC2160 added; 
+
 20251122: An option `axis` has been added to `[carriage <name>]` sections
 for `generic_cartesian` kinematics, allowing arbitrary names for primary
 carriages. Users are encouraged to explicitly specify `axis` option now.

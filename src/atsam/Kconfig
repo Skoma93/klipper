@@ -33,8 +33,8 @@ choice
     config MACH_SAM4E8E
         bool "SAM4e8e"
         select MACH_SAM4E
-    config MACH_SAME70Q20B
-        bool "SAME70Q20B"
+    config MACH_SAME70Q21B
+        bool "SAME70Q21B"
         select MACH_SAME70
 endchoice
 
@@ -60,7 +60,7 @@ config MCU
     default "sam3x8c" if MACH_SAM3X8C
     default "sam4s8c" if MACH_SAM4S8C
     default "sam4e8e" if MACH_SAM4E8E
-    default "same70q20b" if MACH_SAME70Q20B
+    default "same70q21b" if MACH_SAME70Q21B
 
 config CLOCK_FREQ
     int
