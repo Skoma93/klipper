@@ -2509,7 +2509,12 @@ axis:
 #   to 0 (or safe_distance is unset and position_min and position_max are
 #   identical for the primary and dual carriages), the carriages proximity
 #   checks will be disabled.
-#step_pin:
+#simultaneous_homing: False
+#   Enables simultaneous homing of the primary and dual carriages. This option
+#   is only supported with regular Cartesian kinematics. The two carriages must
+#   home in opposing directions, have equal homing travel, and use identical
+#   homing speed, retract distance, retract speed, and second homing speed
+#   settings. The default is False, which homes the carriages sequentially.#step_pin:
 #dir_pin:
 #enable_pin:
 #microsteps:

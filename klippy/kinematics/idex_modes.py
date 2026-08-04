@@ -14,7 +14,8 @@ MIRROR = 'MIRROR'
 
 class DualCarriages:
     VALID_MODES = [INACTIVE, PRIMARY, COPY, MIRROR]
-    def __init__(self, printer, primary_rails, dual_rails, axes, safe_dist):
+    def __init__(self, printer, primary_rails, dual_rails, axes, safe_dist,
+                 simultaneous_homing=False):
         self.printer = printer
         self._init_steppers(primary_rails + dual_rails)
         safe_dist = list(safe_dist)
@@ -43,6 +44,9 @@ class DualCarriages:
                  if c is not None])
         self.saved_states = {}
         self.axes = sorted(set(axes))
+        self.simultaneous_homing = simultaneous_homing
+        if simultaneous_homing:
+            self._validate_simultaneous_homing()
         self.printer.add_object('dual_carriage', self)
         self.printer.register_event_handler("klippy:ready", self._handle_ready)
         gcode = self.printer.lookup_object('gcode')
@@ -78,6 +82,38 @@ class DualCarriages:
             self.dc_stepper_kinematics.append(sk)
             self.orig_stepper_kinematics.append(orig_sk)
             s.set_stepper_kinematics(sk)
+    def _validate_simultaneous_homing(self):
+        dcs = [dc for dc in self.dc_rails.values()
+               if dc.axis in self.axes]
+        if len(self.axes) != 1 or len(dcs) != 2:
+            raise self.printer.config_error(
+                "Simultaneous homing requires exactly two carriages "
+                "on one axis")
+        first_hi = dcs[0].rail.get_homing_info()
+        second_hi = dcs[1].rail.get_homing_info()
+        if first_hi.positive_dir == second_hi.positive_dir:
+            raise self.printer.config_error(
+                "Simultaneous homing requires opposing carriage "
+                "homing directions")
+        fields = ('speed', 'retract_speed', 'retract_dist',
+                  'second_homing_speed')
+        if any(not math.isclose(getattr(first_hi, field),
+                                getattr(second_hi, field))
+               for field in fields):
+            raise self.printer.config_error(
+                "Simultaneous homing requires matching homing speed "
+                "and retract settings")
+        travels = []
+        for dc, hi in zip(dcs, (first_hi, second_hi)):
+            position_min, position_max = dc.rail.get_range()
+            travel = (hi.position_endstop - position_min
+                      if hi.positive_dir else
+                      position_max - hi.position_endstop)
+            travels.append(travel)
+        if not math.isclose(travels[0], travels[1]):
+            raise self.printer.config_error(
+                "Simultaneous homing requires matching carriage "
+                "homing travel")
     def get_axes(self):
         return self.axes
     def get_primary_rail(self, axis):
@@ -90,6 +126,30 @@ class DualCarriages:
             if dc_rail.rail == rail:
                 return dc_rail
         return None
+    def _home_simultaneously(self, homing_state, axis, primary_dc):
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.flush_step_generation()
+        dual_dc = next(dc for dc in self.dual_rails
+                       if dc is not None and dc.axis == axis)
+        primary_hi = primary_dc.rail.get_homing_info()
+        dual_hi = dual_dc.rail.get_homing_info()
+        homepos = [None, None, None, None]
+        homepos[axis] = primary_hi.position_endstop
+        forcepos = list(homepos)
+        position_min, position_max = primary_dc.rail.get_range()
+        if primary_hi.positive_dir:
+            forcepos[axis] -= 1.5 * (primary_hi.position_endstop
+                                    - position_min)
+        else:
+            forcepos[axis] += 1.5 * (position_max
+                                    - primary_hi.position_endstop)
+        primary_dc.activate_homing(PRIMARY, 1., 0.)
+        dual_dc.activate_homing(
+            MIRROR, -1., primary_hi.position_endstop
+                         + dual_hi.position_endstop)
+        homing_state.home_rails(
+            [primary_dc.rail, dual_dc.rail], forcepos, homepos)
+        self.activate_dc_mode(primary_dc, PRIMARY)
     def get_transform(self, rail):
         dc_rail = self.get_dc_rail_wrapper(rail)
         if dc_rail is not None:
@@ -116,6 +176,9 @@ class DualCarriages:
     def home(self, homing_state, axis):
         kin = self.printer.lookup_object('toolhead').get_kinematics()
         homing_rails = [r for r in self.primary_rails if r.axis == axis]
+        if self.simultaneous_homing:
+            self._home_simultaneously(homing_state, axis, homing_rails[0])
+            return
         for dc_rail in homing_rails:
             dcs = [dc for dc in self.dc_rails.values()
                    if dc_rail.rail in [dc.rail, dc.dual_rail]]
@@ -381,6 +444,11 @@ class DualCarriagesRail:
             ffi_lib.dual_carriage_set_transform(
                     sk, self.ENC_AXES[self.axis], self.scale, self.offset)
         self.printer.send_event('dual_carriage:update_kinematics')
+    def activate_homing(self, mode, scale, offset):
+        self.scale = scale
+        self.offset = offset
+        self.apply_transform()
+        self.mode = mode
     def activate(self, mode, position, old_position=None):
         old_axis_position = self.get_axis_position(old_position or position)
         self.scale = -1. if mode == MIRROR else 1.

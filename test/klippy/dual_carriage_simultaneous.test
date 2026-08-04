@@ -1,0 +1,11 @@
+# Test simultaneous homing on a Cartesian dual carriage
+CONFIG dual_carriage_simultaneous.cfg
+DICTIONARY atmega2560.dict
+
+G28 X
+SET_DUAL_CARRIAGE CARRIAGE=1
+G1 X190 F6000
+SET_DUAL_CARRIAGE CARRIAGE=0
+G1 X10 F6000
+G28 X
+QUERY_ENDSTOPS

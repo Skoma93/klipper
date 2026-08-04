@@ -1,0 +1,4 @@
+CONFIG dual_carriage_simultaneous_mismatch.cfg
+DICTIONARY atmega2560.dict
+SHOULD_FAIL
+G28 X
