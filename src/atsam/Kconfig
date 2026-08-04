@@ -33,6 +33,9 @@ choice
     config MACH_SAM4E8E
         bool "SAM4e8e"
         select MACH_SAM4E
+    config MACH_SAME70Q20B
+        bool "SAME70Q20B"
+        select MACH_SAME70
     config MACH_SAME70Q21B
         bool "SAME70Q21B"
         select MACH_SAME70
@@ -60,6 +63,7 @@ config MCU
     default "sam3x8c" if MACH_SAM3X8C
     default "sam4s8c" if MACH_SAM4S8C
     default "sam4e8e" if MACH_SAM4E8E
+    default "same70q20b" if MACH_SAME70Q20B
     default "same70q21b" if MACH_SAME70Q21B
 
 config CLOCK_FREQ
@@ -118,7 +122,13 @@ choice
         bool "USB"
         select USBSERIAL
     config ATSAM_SERIAL
-        bool "Serial"
+        bool "Serial" if !MACH_SAME70
+        select SERIAL
+    config ATSAM_SERIAL_UART2_PD25_PD26
+        bool "Serial (on UART2 PD25/PD26)" if MACH_SAME70
+        select SERIAL
+    config ATSAM_SERIAL_UART0_PA9_PA10
+        bool "Serial (on UART0 PA9/PA10)" if LOW_LEVEL_OPTIONS && MACH_SAME70
         select SERIAL
     config ATSAM_MMENU_CANBUS_PC12_PD12
         bool "CAN bus (on PC12/PD12)"
