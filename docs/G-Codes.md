@@ -524,6 +524,8 @@ The following command is available when a
 [filament_switch_sensor](Config_Reference.md#filament_switch_sensor)
 or
 [filament_motion_sensor](Config_Reference.md#filament_motion_sensor)
+or
+[pat9125_filament_sensor](Config_Reference.md#pat9125_filament_sensor)
 config section is enabled.
 
 #### QUERY_FILAMENT_SENSOR

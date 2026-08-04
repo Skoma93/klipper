@@ -5209,6 +5209,35 @@ switch_pin:
 #   above parameters.
 ```
 
+### [pat9125_filament_sensor]
+
+PAT9125 I2C filament motion sensor. The sensor measures filament displacement
+and uses the configured extruder's commanded position to detect runout or a
+jam.
+
+    [pat9125_filament_sensor my_sensor]
+    extruder:
+    #   The associated extruder or extruder_stepper. This is required.
+    counts_per_mm:
+    #   Calibrated sensor counts per millimeter. This is required.
+    #axis: y
+    #   Measurement axis aligned with filament travel: x or y. Default y.
+    #detection_length: 7.0
+    #   Commanded extrusion without motion before runout. Default 7 mm.
+    #minimum_motion: 0.1
+    #   Accumulated motion that refreshes detection. Default 0.1 mm.
+    #i2c_address: 0x75
+    #i2c_mcu:
+    #i2c_bus:
+    #i2c_speed: 100000
+    #   See common I2C settings for the above parameters.
+    #pause_on_runout:
+    #runout_gcode:
+    #insert_gcode:
+    #event_delay:
+    #pause_delay:
+    #   See filament_switch_sensor for the above parameters.
+
 ### [tsl1401cl_filament_width_sensor]
 
 TSLl401CL Based Filament Width Sensor. See the

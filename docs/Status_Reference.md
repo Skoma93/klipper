@@ -180,6 +180,18 @@ objects:
 - `filament_detected`: Returns True if the sensor is in a triggered
   state.
 
+## pat9125_filament_sensor
+
+The following information is available in
+`pat9125_filament_sensor some_name` objects:
+
+- `filament_detected`: True when filament motion is detected within the
+  configured detection distance.
+- `enabled`: True when the sensor is enabled.
+- `x_counts`: Total signed X displacement counts since Klipper became ready.
+- `y_counts`: Total signed Y displacement counts since Klipper became ready.
+- `motion`: Total signed displacement in millimeters on the configured axis.
+
 ## firmware_retraction
 
 The following information is available in the
