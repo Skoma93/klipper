@@ -1,5 +1,5 @@
-import math, logging
-from . import bus, tmc, tmc2130
+import math
+from . import tmc, tmc2130
 
 
 ######################################################################
@@ -16,7 +16,7 @@ Registers = {
     "FACTORY_CONF": 0x08,
     "SHORT_CONF":   0x09,
     "DRV_CONF":     0x0A,
-    "GLOBAL_SCALER":0x0B,
+    "GLOBALSCALER":  0x0B,
     "OFFSET_READ":  0x0C,
 
     # Velocity dependent feature control (0x10..0x1F + 0x33)
@@ -160,8 +160,8 @@ Fields["DRV_CONF"] = {
 }
 
 # 0x0B GLOBAL_SCALER (W)
-Fields["GLOBAL_SCALER"] = {
-    "global_scaler": 0xff,      # bits 7..0
+Fields["GLOBALSCALER"] = {
+    "globalscaler": 0xff,
 }
 
 # 0x0C OFFSET_READ (R) (signed bytes)
@@ -362,61 +362,75 @@ SignedFields = [
 # TMC stepper current config helper
 ######################################################################
 
-# Practical default. You may increase this if your board and cooling allow it.
-MAX_CURRENT = 3.00
+VREF = 0.325
+# The practical maximum is board and power-stage dependent. This limit is a
+# configuration sanity check consistent with Klipper's TMC5160 support.
+MAX_CURRENT = 10.0
 
 class TMC2160CurrentHelper:
     def __init__(self, config, mcu_tmc):
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
-        run_current = config.getfloat('run_current', above=0., maxval=MAX_CURRENT)
-        hold_current = config.getfloat('hold_current', run_current,
-                                       above=0., maxval=MAX_CURRENT)
+        run_current = config.getfloat(
+            'run_current', above=0., maxval=MAX_CURRENT)
+        hold_current = config.getfloat(
+            'hold_current', run_current, above=0., maxval=MAX_CURRENT)
         self.req_hold_current = hold_current
-        # Rsense in Ohms
-        self.sense_resistor = config.getfloat('sense_resistor', 0.110, above=0.)
-        irun, ihold = self._calc_current(run_current, hold_current)
-
-        # Populate initial register cache
+        self.sense_resistor = config.getfloat(
+            'sense_resistor', 0.075, above=0.)
+        gscaler, irun, ihold = self._calc_current(
+            run_current, hold_current)
+        self.fields.set_field("globalscaler", gscaler)
         self.fields.set_field("ihold", ihold)
         self.fields.set_field("irun", irun)
-        self.fields.set_field("iholddelay", 2)
+        self.fields.set_field("iholddelay", 6)
 
-    def _vfsense(self):
-        # TMC2160 uses a 0.325V full-scale sense reference in the standard formula.
-        # If your hardware uses a different reference, adjust here.
-        return 0.325
+    def _calc_globalscaler(self, current):
+        globalscaler = int(
+            current * 256. * math.sqrt(2.) * self.sense_resistor / VREF
+            + .5)
+        globalscaler = max(32, globalscaler)
+        if globalscaler >= 256:
+            globalscaler = 0
+        return globalscaler
 
-    def _calc_current_bits(self, current_amps):
-        # I_rms = (CS+1)/32 * Vfs / (Rsense * 1.414)
-        # => CS = 32 * I_rms * Rsense * 1.414 / Vfs - 1
-        irms_factor = (32.0 * 1.41421356237 * self.sense_resistor) / self._vfsense()
-        cs = int(round(irms_factor * current_amps - 1.0))
+    def _calc_current_bits(self, current, globalscaler):
+        if not globalscaler:
+            globalscaler = 256
+        cs = int(
+            current * 256. * 32. * math.sqrt(2.) * self.sense_resistor
+            / (globalscaler * VREF) - 1. + .5)
         return max(0, min(31, cs))
 
-    def _calc_current_from_bits(self, cs):
-        irms_factor = (32.0 * 1.41421356237 * self.sense_resistor) / self._vfsense()
-        return (cs + 1) / irms_factor
-
     def _calc_current(self, run_current, hold_current):
-        irun = self._calc_current_bits(run_current)
-        ihold = self._calc_current_bits(min(hold_current, run_current))
-        return irun, ihold
+        gscaler = self._calc_globalscaler(run_current)
+        irun = self._calc_current_bits(run_current, gscaler)
+        ihold = self._calc_current_bits(
+            min(hold_current, run_current), gscaler)
+        return gscaler, irun, ihold
+
+    def _calc_current_from_field(self, field_name):
+        globalscaler = self.fields.get_field("globalscaler")
+        if not globalscaler:
+            globalscaler = 256
+        bits = self.fields.get_field(field_name)
+        return (globalscaler * (bits + 1) * VREF
+                / (256. * 32. * math.sqrt(2.) * self.sense_resistor))
 
     def get_current(self):
-        irun = self.fields.get_field("irun")
-        ihold = self.fields.get_field("ihold")
-        run_current = self._calc_current_from_bits(irun)
-        hold_current = self._calc_current_from_bits(ihold)
+        run_current = self._calc_current_from_field("irun")
+        hold_current = self._calc_current_from_field("ihold")
         return run_current, hold_current, self.req_hold_current, MAX_CURRENT
 
     def set_current(self, run_current, hold_current, print_time):
         self.req_hold_current = hold_current
-        irun, ihold = self._calc_current(run_current, hold_current)
+        gscaler, irun, ihold = self._calc_current(
+            run_current, hold_current)
+        val = self.fields.set_field("globalscaler", gscaler)
+        self.mcu_tmc.set_register("GLOBALSCALER", val, print_time)
         self.fields.set_field("ihold", ihold)
         val = self.fields.set_field("irun", irun)
         self.mcu_tmc.set_register("IHOLD_IRUN", val, print_time)
-
 
 ######################################################################
 # TMC2160 printer object
@@ -526,8 +540,6 @@ class TMC2160:
         _set_if_defined("drvstrength", 0)
         _set_if_defined("filt_isense", 0)
 
-        # GLOBAL_SCALER is safe to write (0 means full scale)
-        set_config_field(config, "global_scaler", 0)
 
 
 def load_config_prefix(config):
