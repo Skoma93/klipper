@@ -4,27 +4,45 @@ from . import bus
 
 EMC2305_I2C_ADDR = 0x4D
 
-EMC2305_RESET_CHIP_VALUE = 0
 EMC2305_PULL_IO_VALUE = 31
 EMC2305_SMBUS_DISABLE_VALUE = 192
 
+EMC2305_BASE_FREQUENCIES = (
+    (26000., 0),
+    (19531., 1),
+    (4882., 2),
+    (2441., 3),
+)
+
 EMC2305_REGS = {
-    'STATUS': 0x24,
     'REG_FAN_PWM_OUTPUT': 0x2b,
     'REG_FAN_CONFIG': 0x20,
 
-    'REG_FREQ0': 0x31,
-    'REG_FREQ1': 0x2c,
-    'REG_FREQ2': 0x2d,
-    'REG_FREQ3': 0x51,
-    'REG_FREQ4': 0x71,
+    'REG_PWM_BASE45': 0x2c,
+    'REG_PWM_BASE123': 0x2d,
 
     'EMC2305_FAN0_SETTING_REG': 0x30,
     'EMC2305_FAN1_SETTING_REG': 0x40,
     'EMC2305_FAN2_SETTING_REG': 0x50,
     'EMC2305_FAN3_SETTING_REG': 0x60,
     'EMC2305_FAN4_SETTING_REG': 0x70,
+    'EMC2305_FAN0_DIVIDE_REG': 0x31,
+    'EMC2305_FAN1_DIVIDE_REG': 0x41,
+    'EMC2305_FAN2_DIVIDE_REG': 0x51,
+    'EMC2305_FAN3_DIVIDE_REG': 0x61,
+    'EMC2305_FAN4_DIVIDE_REG': 0x71,
 }
+
+
+def _select_pwm_frequency(requested_hz):
+    candidates = []
+    for base_hz, base_code in EMC2305_BASE_FREQUENCIES:
+        divider = max(1, min(255, int(round(base_hz / requested_hz))))
+        actual_hz = base_hz / divider
+        candidates.append((abs(actual_hz - requested_hz), base_code,
+                           divider, actual_hz))
+    _error, base_code, divider, actual_hz = min(candidates)
+    return base_code, divider, actual_hz
 
 
 class EMC2305:
@@ -35,7 +53,8 @@ class EMC2305:
         self._name = name_parts[1] if len(name_parts) > 1 else "default"
 
         self.i2c = bus.MCU_I2C_from_config(
-            config, default_addr=EMC2305_I2C_ADDR, default_speed=100000
+            config, default_addr=EMC2305_I2C_ADDR, default_speed=100000,
+            async_write_only=True
         )
 
         self._ppins = self._printer.lookup_object("pins")
@@ -43,35 +62,30 @@ class EMC2305:
 
         self.chip_registers = EMC2305_REGS
         self._last_pwm = [None] * 5
-
-        freqtypes = {
-            "26KHZ": 0,
-            "150HZ": 16,
-            "5KHZ": 32,
-            "2.4KHZ": 48,
-        }
-        self.freq = [
-            config.getchoice('freq_ch0', freqtypes, default="26KHZ"),
-            config.getchoice('freq_ch1', freqtypes, default="26KHZ"),
-            config.getchoice('freq_ch2', freqtypes, default="26KHZ"),
-            config.getchoice('freq_ch3', freqtypes, default="26KHZ"),
-            config.getchoice('freq_ch4', freqtypes, default="26KHZ"),
-        ]
+        self._frequencies = [None] * 5
 
         self._printer.register_event_handler("klippy:connect", self._handle_connect)
 
     def _handle_connect(self):
-        # Note: verify these register meanings against the EMC2305 datasheet
-        self.write_register('STATUS', EMC2305_RESET_CHIP_VALUE)
         self.write_register('REG_FAN_PWM_OUTPUT', EMC2305_PULL_IO_VALUE)
         self.write_register('REG_FAN_CONFIG', EMC2305_SMBUS_DISABLE_VALUE)
 
-        # Program frequencies
-        self.write_register('REG_FREQ0', self.freq[0])
-        self.write_register('REG_FREQ1', self.freq[1])
-        self.write_register('REG_FREQ2', self.freq[2])
-        self.write_register('REG_FREQ3', self.freq[3])
-        self.write_register('REG_FREQ4', self.freq[4])
+        base_codes = []
+        for channel in range(5):
+            frequency = self._frequencies[channel]
+            if frequency is None:
+                frequency = _select_pwm_frequency(26000.)
+            base_code, divider, actual_hz = frequency
+            base_codes.append(base_code)
+            self.write_register('EMC2305_FAN%d_DIVIDE_REG' % channel,
+                                divider)
+            logging.info('EMC2305 %s PWM%d frequency %.3fHz',
+                         self._name, channel + 1, actual_hz)
+        self.write_register('REG_PWM_BASE123',
+                            base_codes[0] | base_codes[1] << 2
+                            | base_codes[2] << 4)
+        self.write_register('REG_PWM_BASE45',
+                            base_codes[3] | base_codes[4] << 2)
 
         # Force all channels to off on connect
         for i in range(5):
@@ -85,6 +99,15 @@ class EMC2305:
 
     def get_mcu(self):
         return self.i2c.get_mcu()
+
+    def set_frequency(self, fan_index, cycle_time):
+        requested_hz = 1. / cycle_time
+        frequency = _select_pwm_frequency(requested_hz)
+        previous = self._frequencies[fan_index]
+        if previous is not None and previous[:2] != frequency[:2]:
+            raise pins.error('Conflicting EMC2305 PWM%d frequencies'
+                             % (fan_index + 1,))
+        self._frequencies[fan_index] = frequency
 
     def write_register(self, reg_name, data):
         if not isinstance(data, (list, tuple)):
@@ -127,6 +150,7 @@ class EMC2305_pwm:
 
     def setup_cycle_time(self, cycle_time, hardware_pwm=False):
         self._cycle_time = cycle_time
+        self._emc2305.set_frequency(self._emcpin, cycle_time)
 
     def setup_start_value(self, start_value, shutdown_value, is_static=False):
         if is_static and start_value != shutdown_value:

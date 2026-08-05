@@ -3454,6 +3454,26 @@ with the SET_FAN_SPEED [gcode command](G-Codes.md#fan_generic).
 #   See the "fan" section for a description of the above parameters.
 ```
 
+### [emc2305]
+
+EMC2305 five-channel I2C PWM fan controller support. Define the controller,
+then use `emc2305_<name>:PIN_0` through `PIN_4` as pins in standard fan
+sections. Pin numbering is zero-based: `PIN_0` controls physical PWM1 and
+`PIN_4` controls PWM5.
+
+```
+[emc2305 my_fans]
+#i2c_address: 77
+#i2c_mcu: mcu
+#i2c_bus:
+#i2c_speed: 100000
+```
+
+The `cycle_time` configured in each fan section selects that channel's PWM
+frequency. The driver chooses the closest frequency supported by the EMC2305
+base-frequency and divider registers. Tachometer feedback and closed-loop RPM
+control are not supported.
+
 ## LEDs
 
 ### [led]
