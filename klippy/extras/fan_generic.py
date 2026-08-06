@@ -4,13 +4,16 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
-from . import fan, output_pin
+from . import fan, fan_tachometer, output_pin
 
 class PrinterFanGeneric:
     cmd_SET_FAN_SPEED_help = "Sets the speed of a fan"
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.fan = fan.Fan(config, default_shutdown_speed=0.)
+        if config.getboolean('sampled_tachometer', False):
+            self.fan = fan_tachometer.SampledTachometerFan(config)
+        else:
+            self.fan = fan.Fan(config, default_shutdown_speed=0.)
         self.fan_name = config.get_name().split()[-1]
 
         # Template handling

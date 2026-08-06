@@ -156,11 +156,24 @@ The following information is available for extruder_stepper objects (as well as
 The following information is available in
 [fan](Config_Reference.md#fan),
 [heater_fan some_name](Config_Reference.md#heater_fan) and
-[controller_fan some_name](Config_Reference.md#controller_fan)
-objects:
-- `speed`: The fan speed as a float between 0.0 and 1.0.
+[controller_fan some_name](Config_Reference.md#controller_fan), and
+[fan_generic some_name](Config_Reference.md#fan_generic) objects:
+- `speed`: The requested logical fan speed as a float between 0.0 and 1.0.
+  Physical output mapping by `min_power` and temporary sampling are not exposed.
+- `starting`: Whether a configured PWM ramp or kick-start hold is active.
+- `measuring`: For a sampled tachometer, whether pulse measurement is active.
 - `rpm`: The measured fan speed in rotations per minute if the fan has
   a tachometer_pin defined.
+
+## fan_tachometer
+
+The following information is available in `fan_tachometer some_name` objects:
+- `rpm`: The continuously measured fan speed in rotations per minute.
+## fan_stall_monitor
+
+The following information is available in `fan_stall_monitor some_name` objects:
+- `rpm`: The last measured fan speed in rotations per minute.
+- `stalled`: True when the enabled fan did not report rotation.
 
 ## filament_switch_sensor
 

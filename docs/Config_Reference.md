@@ -3237,6 +3237,14 @@ pin:
 #   will be scaled between zero and max_power (for example, if
 #   max_power is .9 and a fan speed of 80% is requested then the fan
 #   power will be set to 72%). The default is 1.0.
+#min_power: 0.0
+#   The minimum power (expressed as a value from 0.0 to 1.0) used for
+#   non-zero fan requests. Requests above zero are linearly scaled
+#   between min_power and max_power. For example, with min_power 0.3
+#   and max_power 1.0, a 50% request produces 65% pin power. A zero
+#   request always turns the fan fully off. The default is 0.0.
+#
+#   min_power must not be greater than max_power.
 #shutdown_speed: 0
 #   The desired fan speed (expressed as a value from 0.0 to 1.0) if
 #   the micro-controller software enters an error state. The default
@@ -3256,6 +3264,11 @@ pin:
 #   Time (in seconds) to run the fan at full speed when either first
 #   enabling or increasing it by more than 50% (helps get the fan
 #   spinning). The default is 0.100 seconds.
+#spin_up_time: 0.0
+#   On startup, ramp physical PWM linearly from zero to max_power over this
+#   many seconds, then hold max_power for kick_start_time before settling to
+#   the requested mapped power. A value of zero disables the ramp and retains
+#   normal kick-start behavior. The default is 0.0 seconds.
 #off_below: 0.0
 #   The minimum input speed which will power the fan (expressed as a
 #   value from 0.0 to 1.0). When a speed lower than off_below is
@@ -3452,8 +3465,50 @@ with the SET_FAN_SPEED [gcode command](G-Codes.md#fan_generic).
 #tachometer_poll_interval:
 #enable_pin:
 #   See the "fan" section for a description of the above parameters.
+#sampled_tachometer: False
+#   Use two-pulse sampled tachometer measurement for a low-side-switched fan.
+#   When enabled, tachometer_pin is briefly measured at sampling_pwm without
+#   changing the reported logical fan speed. The default is False.
+#pulse_timeout: 0.5
+#   Maximum time in seconds to wait for the second sampled tach pulse.
+#sampling_pwm: 1.0
+#   Physical PWM duty used during sampled tachometer measurement. It must not
+#   exceed max_power.
 ```
 
+### [fan_tachometer my_fan]
+
+Independent continuously sampled fan tachometer for outputs that are not
+configured as Klipper fan objects.
+
+```
+[fan_tachometer my_fan]
+#tachometer_pin:
+#   Tachometer input pin. This parameter is required.
+#tachometer_ppr: 2
+#tachometer_poll_interval: 0.0015
+#   See the "fan" section for these tachometer parameters.
+#tachometer_report_interval: 1.0
+#   Accumulation/reporting period in seconds. The default is 1.0.
+```
+### [fan_stall_monitor my_fan]
+
+Periodically warn when an enabled fan does not report rotation.
+
+```
+[fan_stall_monitor my_fan]
+#fan:
+#   Full config object name of the monitored fan. This parameter is required.
+#tachometer:
+#   Optional separate object providing RPM or sampled measurement. The fan
+#   object is used by default.
+#check_interval: 5.0
+#spin_up_time: 0.5
+#   Full-power settling time before sampled pulse measurement.
+#startup_delay: 2.0
+#   Grace period before the first stall check when the previous fan setpoint
+#   was zero. Subsequent checks use check_interval.
+```
 ### [emc2305]
 
 EMC2305 five-channel I2C PWM fan controller support. Define the controller,

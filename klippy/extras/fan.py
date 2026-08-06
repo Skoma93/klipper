@@ -6,13 +6,22 @@
 from . import pulse_counter, output_pin
 
 class Fan:
-    def __init__(self, config, default_shutdown_speed=0.):
+    def __init__(self, config, default_shutdown_speed=0.,
+                 setup_tachometer=True):
         self.printer = config.get_printer()
         self.last_fan_value = self.last_req_value = 0.
+        self.request_generation = 0
+        self.startup_phase = self.startup_request = None
+        self.startup_step = self.startup_steps = 0
+        self.startup_step_time = 0.
         # Read config
         self.max_power = config.getfloat('max_power', 1., above=0., maxval=1.)
+        self.min_power = config.getfloat('min_power', 0., minval=0.,
+                                         maxval=self.max_power)
+
         self.kick_start_time = config.getfloat('kick_start_time', 0.1,
                                                minval=0.)
+        self.spin_up_time = config.getfloat('spin_up_time', 0., minval=0.)
         self.off_below = config.getfloat('off_below', default=0.,
                                          minval=0., maxval=1.)
         cycle_time = config.getfloat('cycle_time', 0.010, above=0.)
@@ -38,7 +47,7 @@ class Fan:
                                                  self._apply_speed)
 
         # Setup tachometer
-        self.tachometer = FanTachometer(config)
+        self.tachometer = (FanTachometer(config) if setup_tachometer else None)
 
         # Register callbacks
         self.printer.register_event_handler("gcode:request_restart",
@@ -46,26 +55,77 @@ class Fan:
 
     def get_mcu(self):
         return self.mcu_fan.get_mcu()
+    def _scale_power(self, value):
+        if not value:
+            return 0.
+        return self.min_power + value * (self.max_power - self.min_power)
+    def _set_power(self, print_time, value):
+        if self.enable_pin:
+            if value > 0. and self.last_fan_value == 0.:
+                self.enable_pin.set_digital(print_time, 1)
+            elif value == 0. and self.last_fan_value > 0.:
+                self.enable_pin.set_digital(print_time, 0)
+        self.last_fan_value = value
+        self.mcu_fan.set_pwm(print_time, value)
     def _apply_speed(self, print_time, value):
         if value < self.off_below:
             value = 0.
-        value = max(0., min(self.max_power, value * self.max_power))
-        if value == self.last_fan_value:
+        value = max(0., min(1., value))
+        power = self._scale_power(value)
+
+        # Continue a zero-to-full startup ramp for the same request.
+        if self.startup_phase is not None and value == self.startup_request:
+            if self.startup_phase == 'ramp':
+                self.startup_step += 1
+                fraction = self.startup_step / self.startup_steps
+                self._set_power(print_time, self.max_power * fraction)
+                if self.startup_step < self.startup_steps:
+                    return "repeat", print_time + self.startup_step_time
+                self.startup_phase = 'hold'
+                return "repeat", print_time + self.kick_start_time
+            self.startup_phase = self.startup_request = None
+            self._set_power(print_time, power)
+            return
+
+        self.startup_phase = self.startup_request = None
+        self.request_generation += 1
+        self.last_req_value = value
+        if power == self.last_fan_value:
             return "discard", 0.
-        if self.enable_pin:
-            if value > 0 and self.last_fan_value == 0:
-                self.enable_pin.set_digital(print_time, 1)
-            elif value == 0 and self.last_fan_value > 0:
-                self.enable_pin.set_digital(print_time, 0)
-        if (value and self.kick_start_time
-            and (not self.last_fan_value or value - self.last_fan_value > .5)):
+        if power and not self.last_fan_value and self.spin_up_time:
+            # Ramp physical PWM from zero to max_power, hold at max_power for
+            # kick_start_time, then settle to the requested mapped power.
+            self.startup_phase = 'ramp'
+            self.startup_request = value
+            self.startup_steps = max(1, int(self.spin_up_time / .05 + .5))
+            self.startup_step = 0
+            self.startup_step_time = self.spin_up_time / self.startup_steps
+            self._set_power(print_time, 0.)
+            return "repeat", print_time + self.startup_step_time
+        if (power and self.kick_start_time
+            and (not self.last_fan_value
+                 or power - self.last_fan_value > .5)):
             # Run fan at full speed for specified kick_start_time
-            self.last_req_value = value
-            self.last_fan_value = self.max_power
-            self.mcu_fan.set_pwm(print_time, self.max_power)
+            self._set_power(print_time, self.max_power)
             return "repeat", print_time + self.kick_start_time
-        self.last_fan_value = self.last_req_value = value
-        self.mcu_fan.set_pwm(print_time, value)
+        self._set_power(print_time, power)
+    def begin_power_override(self, value):
+        mcu = self.get_mcu()
+        eventtime = self.printer.get_reactor().monotonic()
+        print_time = mcu.estimated_print_time(
+            eventtime + mcu.min_schedule_time())
+        token = self.request_generation
+        value = max(0., min(self.max_power, value))
+        self._set_power(print_time, value)
+        return token
+    def end_speed_override(self, token):
+        if token != self.request_generation:
+            return
+        mcu = self.get_mcu()
+        eventtime = self.printer.get_reactor().monotonic()
+        print_time = mcu.estimated_print_time(
+            eventtime + mcu.min_schedule_time())
+        self._set_power(print_time, self._scale_power(self.last_req_value))
     def set_speed(self, value, print_time=None):
         self.gcrq.send_async_request(value, print_time)
     def set_speed_from_command(self, value):
@@ -74,10 +134,12 @@ class Fan:
         self.set_speed(0., print_time)
 
     def get_status(self, eventtime):
-        tachometer_status = self.tachometer.get_status(eventtime)
+        tachometer_status = (self.tachometer.get_status(eventtime)
+                              if self.tachometer is not None else {'rpm': None})
         return {
             'speed': self.last_req_value,
             'rpm': tachometer_status['rpm'],
+            'starting': self.startup_phase is not None,
         }
 
 class FanTachometer:
