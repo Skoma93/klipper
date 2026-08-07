@@ -1588,7 +1588,8 @@ is enabled.
 [max_speed=<max_speed>]`: Sets the target temperature for a
 temperature_fan. If a target is not supplied, it is set to the
 specified temperature in the config file. If speeds are not supplied,
-no change is applied.
+no change is applied. A zero target disables the fan unless its configuration
+sets `allow_target_zero: False`, in which case the command is rejected.
 
 ### [temperature_probe]
 

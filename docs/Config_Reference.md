@@ -49,7 +49,7 @@ serial:
 #restart_method:
 #   This controls the mechanism the host will use to reset the
 #   micro-controller. The choices are 'arduino', 'cheetah', 'rpi_usb',
-#   and 'command'. The 'arduino' method (toggle DTR) is common on
+#   'rpi_gpio', and 'command'. The 'arduino' method (toggle DTR) is common on
 #   Arduino boards and clones. The 'cheetah' method is a special
 #   method needed for some Fysetc Cheetah boards. The 'rpi_usb' method
 #   is useful on Raspberry Pi boards with micro-controllers powered
@@ -58,6 +58,14 @@ serial:
 #   sending a Klipper command to the micro-controller so that it can
 #   reset itself. The default is 'arduino' if the micro-controller
 #   communicates over a serial port, 'command' otherwise.
+#restart_gpio:
+#   Raspberry Pi BCM GPIO number connected to an active-low MCU reset input.
+#   This parameter must be provided when restart_method is "rpi_gpio". The
+#   method requires the `pinctrl` command. It asserts the pin as output-low and
+#   releases it as an input with no pull; it never drives the reset pin high.
+#restart_gpio_duration: 0.1
+#   Time in seconds to hold restart_gpio low. The value must be greater than
+#   zero and no more than 2 seconds. The default is 0.1 seconds.
 ```
 
 ### [mcu my_extra_mcu]
@@ -3299,8 +3307,9 @@ pin:
 #   Optional pin to enable power to the fan. This can be useful for fans
 #   with dedicated PWM inputs. Some of these fans stay on even at 0% PWM
 #   input. In such a case, the PWM pin can be used normally, and e.g. a
-#   ground-switched FET(standard fan pin) can be used to control power to
-#   the fan.
+#   ground-switched FET (standard fan pin) can be used to control power to
+#   the fan. The enable pin initializes and shuts down low. It is asserted
+#   whenever physical fan power is nonzero and deasserted at zero power.
 ```
 
 ### [heater_fan]
@@ -3336,6 +3345,13 @@ a shutdown_speed equal to max_power.
 #   The fan speed (expressed as a value from 0.0 to 1.0) that the fan
 #   will be set to when its associated heater is enabled. The default
 #   is 1.0
+#speed_points:
+#   Optional list of temperature (in Celsius) and logical fan speed pairs.
+#   When provided, the fan uses the highest current temperature of its
+#   associated heaters and linearly interpolates between adjacent points.
+#   Temperatures must be strictly increasing and speeds must be from 0.0 to
+#   1.0. Output is clamped to the first or last speed outside the configured
+#   range. This replaces heater_temp/fan_speed on-off control.
 ```
 
 ### [controller_fan]
@@ -3410,6 +3426,8 @@ information.
 #sensor_type:
 #sensor_pin:
 #control:
+#   Control algorithm (either watermark, pid, or curve). Curve control maps
+#   sensor temperature to fan speed using speed_points below.
 #max_delta:
 #min_temp:
 #max_temp:
@@ -3429,16 +3447,30 @@ information.
 #   A time value (in seconds) over which temperature measurements will
 #   be smoothed when using the PID control algorithm. This may reduce
 #   the impact of measurement noise. The default is 2 seconds.
+#speed_points:
+#   A list of temperature (in Celsius) and logical fan speed pairs used when
+#   control is set to "curve". At least two pairs must be provided, ordered by
+#   strictly increasing temperature, with speeds from 0.0 to 1.0. The fan speed
+#   is linearly interpolated between adjacent points and is clamped to the first
+#   or last speed outside the configured temperature range. A zero speed turns
+#   the fan off. Nonzero speeds are mapped between the fan's min_power and
+#   max_power settings. This parameter must be provided for curve control.
 #target_temp: 40.0
-#   A temperature (in Celsius) that will be the target temperature.
+#   A temperature (in Celsius) that will be the target temperature. With curve
+#   control the configured speed points determine output, and target_temp is
+#   used only to enable the controller; setting it to zero disables the fan.
 #   The default is 40 degrees.
+#allow_target_zero: True
+#   If false, SET_TEMPERATURE_FAN_TARGET requests with TARGET=0 are rejected,
+#   preventing runtime commands and user interfaces from disabling the fan.
+#   The default is True.
 #max_speed: 1.0
 #   The fan speed (expressed as a value from 0.0 to 1.0) that the fan
 #   will be set to when the sensor temperature exceeds the set value.
 #   The default is 1.0.
 #min_speed: 0.3
 #   The minimum fan speed (expressed as a value from 0.0 to 1.0) that
-#   the fan will be set to for PID temperature fans.
+#   the fan will be set to for PID and curve temperature fans.
 #   The default is 0.3.
 #gcode_id:
 #   If set, the temperature will be reported in M105 queries using the

@@ -1,0 +1,6 @@
+# A protected temperature fan must reject its disable target
+DICTIONARY atmega2560.dict
+CONFIG temperature.cfg
+SHOULD_FAIL
+
+SET_TEMPERATURE_FAN_TARGET TEMPERATURE_FAN=test_curve TARGET=0

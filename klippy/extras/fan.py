@@ -41,6 +41,7 @@ class Fan:
         if enable_pin is not None:
             self.enable_pin = ppins.setup_pin('digital_out', enable_pin)
             self.enable_pin.setup_max_duration(0.)
+            self.enable_pin.setup_start_value(0., 0.)
 
         # Create gcode request queue
         self.gcrq = output_pin.GCodeRequestQueue(config, self.mcu_fan.get_mcu(),

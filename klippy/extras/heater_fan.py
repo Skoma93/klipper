@@ -17,6 +17,21 @@ class PrinterHeaterFan:
         self.heaters = []
         self.fan = fan.Fan(config, default_shutdown_speed=1.)
         self.fan_speed = config.getfloat("fan_speed", 1., minval=0., maxval=1.)
+        self.speed_points = config.getlists(
+            'speed_points', None, seps=(',', '\n'), parser=float, count=2)
+        if self.speed_points is not None:
+            prev_temp = None
+            for temp, speed in self.speed_points:
+                if prev_temp is not None and temp <= prev_temp:
+                    raise config.error("Speed point temperatures must be "
+                                       "strictly increasing")
+                if speed < 0. or speed > 1.:
+                    raise config.error("Speed point value %.3f outside range "
+                                       "0.0 to 1.0" % (speed,))
+                prev_temp = temp
+            if len(self.speed_points) < 2:
+                raise config.error("Option 'speed_points' must contain at "
+                                   "least two temperature, speed pairs")
         self.last_speed = 0.
     def handle_ready(self):
         pheaters = self.printer.lookup_object('heaters')
@@ -25,12 +40,26 @@ class PrinterHeaterFan:
         reactor.register_timer(self.callback, reactor.monotonic()+PIN_MIN_TIME)
     def get_status(self, eventtime):
         return self.fan.get_status(eventtime)
+    def _curve_speed(self, temp):
+        if temp <= self.speed_points[0][0]:
+            return self.speed_points[0][1]
+        if temp >= self.speed_points[-1][0]:
+            return self.speed_points[-1][1]
+        for (low_temp, low_speed), (high_temp, high_speed) in zip(
+                self.speed_points, self.speed_points[1:]):
+            if temp <= high_temp:
+                fraction = (temp - low_temp) / (high_temp - low_temp)
+                return low_speed + fraction * (high_speed - low_speed)
     def callback(self, eventtime):
         speed = 0.
-        for heater in self.heaters:
-            current_temp, target_temp = heater.get_temp(eventtime)
-            if target_temp or current_temp > self.heater_temp:
-                speed = self.fan_speed
+        if self.speed_points is not None:
+            current_temp = max(h.get_temp(eventtime)[0] for h in self.heaters)
+            speed = self._curve_speed(current_temp)
+        else:
+            for heater in self.heaters:
+                current_temp, target_temp = heater.get_temp(eventtime)
+                if target_temp or current_temp > self.heater_temp:
+                    speed = self.fan_speed
         if speed != self.last_speed:
             self.last_speed = speed
             self.fan.set_speed(speed)

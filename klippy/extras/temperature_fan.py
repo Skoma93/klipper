@@ -35,7 +35,10 @@ class TemperatureFan:
             'target_temp', 40. if self.max_temp > 40. else self.max_temp,
             minval=self.min_temp, maxval=self.max_temp)
         self.target_temp = self.target_temp_conf
-        algos = {'watermark': ControlBangBang, 'pid': ControlPID}
+        self.allow_target_zero = config.getboolean(
+            'allow_target_zero', True)
+        algos = {'watermark': ControlBangBang, 'pid': ControlPID,
+                 'curve': ControlCurve}
         algo = config.getchoice('control', algos)
         self.control = algo(self, config)
         self.next_speed_time = 0.
@@ -90,6 +93,9 @@ class TemperatureFan:
         self.set_max_speed(max_speed)
 
     def set_temp(self, degrees):
+        if not degrees and not self.allow_target_zero:
+            raise self.printer.command_error(
+                "Temperature fan '%s' may not be disabled" % (self.name,))
         if degrees and (degrees < self.min_temp or degrees > self.max_temp):
             raise self.printer.command_error(
                 "Requested temperature (%.1f) out of range (%.1f:%.1f)"
@@ -132,6 +138,48 @@ class ControlBangBang:
         else:
             self.temperature_fan.set_tf_speed(
                 read_time, self.temperature_fan.get_max_speed())
+
+######################################################################
+# Temperature curve control algo
+######################################################################
+
+class ControlCurve:
+    def __init__(self, temperature_fan, config):
+        self.temperature_fan = temperature_fan
+        self.points = config.getlists(
+            'speed_points', seps=(',', '\n'), parser=float, count=2)
+        if len(self.points) < 2:
+            raise config.error("Option 'speed_points' must contain at least "
+                               "two temperature, speed pairs")
+        prev_temp = None
+        for temp, speed in self.points:
+            if (temp < temperature_fan.min_temp
+                    or temp > temperature_fan.max_temp):
+                raise config.error("Speed point temperature %.3f outside "
+                                   "configured min_temp/max_temp range"
+                                   % (temp,))
+            if prev_temp is not None and temp <= prev_temp:
+                raise config.error("Speed point temperatures must be strictly "
+                                   "increasing")
+            if speed < 0. or speed > 1.:
+                raise config.error("Speed point value %.3f outside range "
+                                   "0.0 to 1.0" % (speed,))
+            prev_temp = temp
+    def temperature_callback(self, read_time, temp):
+        if temp <= self.points[0][0]:
+            speed = self.points[0][1]
+        elif temp >= self.points[-1][0]:
+            speed = self.points[-1][1]
+        else:
+            for (low_temp, low_speed), (high_temp, high_speed) in zip(
+                    self.points, self.points[1:]):
+                if temp <= high_temp:
+                    fraction = ((temp - low_temp) /
+                                (high_temp - low_temp))
+                    speed = low_speed + fraction * (high_speed - low_speed)
+                    break
+        speed = min(speed, self.temperature_fan.get_max_speed())
+        self.temperature_fan.set_tf_speed(read_time, speed)
 
 ######################################################################
 # Proportional Integral Derivative (PID) control algo

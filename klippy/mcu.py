@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2026  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import sys, os, zlib, logging, math, struct
+import sys, os, zlib, logging, math, struct, subprocess
 import serialhdl, msgproto, pins, chelper, clocksync
 
 class error(Exception):
@@ -663,12 +663,19 @@ class MCURestartHelper:
         self._reactor = printer.get_reactor()
         self._name = mcu.get_name()
         # Restart tracking
-        restart_methods = [None, 'arduino', 'cheetah', 'command', 'rpi_usb']
+        restart_methods = [None, 'arduino', 'cheetah', 'command', 'rpi_usb',
+                           'rpi_gpio']
         self._restart_method = 'command'
         serialport, baud = conn_helper.get_serialport()
         if baud:
             self._restart_method = config.getchoice('restart_method',
                                                     restart_methods, None)
+        self._restart_gpio = None
+        self._restart_gpio_duration = .1
+        if self._restart_method == 'rpi_gpio':
+            self._restart_gpio = config.getint('restart_gpio', minval=0)
+            self._restart_gpio_duration = config.getfloat(
+                'restart_gpio_duration', .1, above=0., maxval=2.)
         self._reset_cmd = self._config_reset_cmd = None
         self._is_mcu_bridge = False
         # Register handlers
@@ -751,11 +758,30 @@ class MCURestartHelper:
         chelper.run_hub_ctrl(0)
         self._reactor.pause(self._reactor.monotonic() + 2.)
         chelper.run_hub_ctrl(1)
+    def _restart_rpi_gpio(self):
+        logging.info("Attempting MCU '%s' reset via Raspberry Pi GPIO%d",
+                     self._name, self._restart_gpio)
+        self._disconnect()
+        gpio = str(self._restart_gpio)
+        try:
+            ret = subprocess.call(['pinctrl', 'set', gpio, 'op', 'dl'])
+            if ret:
+                raise error("Unable to assert MCU reset GPIO%d"
+                            % (self._restart_gpio,))
+            self._reactor.pause(
+                self._reactor.monotonic() + self._restart_gpio_duration)
+        finally:
+            ret = subprocess.call(['pinctrl', 'set', gpio, 'ip', 'pn'])
+            if ret:
+                logging.error("Unable to release MCU reset GPIO%d",
+                              self._restart_gpio)
     def _firmware_restart(self, force=False):
         if self._is_mcu_bridge and not force:
             return
         if self._restart_method == 'rpi_usb':
             self._restart_rpi_usb()
+        elif self._restart_method == 'rpi_gpio':
+            self._restart_rpi_gpio()
         elif self._restart_method == 'command':
             self._restart_via_command()
         elif self._restart_method == 'cheetah':
