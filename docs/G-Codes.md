@@ -1067,6 +1067,17 @@ be between 0.0 and 1.0, unless a 'scale' is defined in the config.
 When 'scale' is defined, then this value should be  between 0.0 and
 'scale'.
 
+### [pmic]
+
+The following command is available when a
+[pmic config section](Config_Reference.md#pmic) is enabled.
+
+#### CLEAR_PMIC_FAULT
+
+`CLEAR_PMIC_FAULT PMIC=<name>`: Clear the named channel's software fault
+latch. The command reports an error and preserves the latch while the configured
+fault input is active. Clearing a latch does not turn the channel on.
+
 ### [output_pin]
 
 The following command is available when an

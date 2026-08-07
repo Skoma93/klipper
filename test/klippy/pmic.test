@@ -1,0 +1,8 @@
+# Test PMIC virtual PWM pin configuration and commands
+CONFIG pmic.cfg
+DICTIONARY atmega2560.dict
+
+SET_PIN PIN=protected_load VALUE=0
+SET_PIN PIN=protected_load VALUE=0.5
+SET_PIN PIN=protected_load VALUE=1
+CLEAR_PMIC_FAULT PMIC=protected_load

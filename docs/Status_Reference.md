@@ -405,6 +405,20 @@ is defined):
 - `live_extruder_velocity`: The requested extruder velocity (in mm/s)
   at the current time.
 
+## pmic
+
+The following information is available in `pmic <name>` objects:
+
+- `value`: The last logical output value requested for the channel.
+- `fault`: True while the configured fault input is active.
+- `fault_latched`: True after an enabled channel detects a fault and until
+- `retry_count`: Number of output retrigger attempts in the current fault window.
+  `CLEAR_PMIC_FAULT` succeeds.
+- `shutdown_value`: Logical output value configured for an MCU shutdown.
+- `error_severity`: The configured `silent`, `warning`, or `critical` policy.
+- `off_delay_remaining`: Seconds remaining before a latched channel is forced
+  off.
+
 ## output_pin
 
 The following information is available in

@@ -3779,6 +3779,44 @@ pin:
 #   These options are deprecated and should no longer be specified.
 ```
 
+### [pmic]
+
+Protected power-output channel with a digital fault input. Each section
+registers a virtual pin named `pmic_<name>:OUT`. The virtual pin may be used by
+an `output_pin`, fan, or another module that accepts a digital or PWM output.
+
+```
+[pmic my_channel]
+output_pin:
+#   MCU pin connected to the channel input. This parameter must be provided.
+fault_pin:
+#   MCU pin connected to the channel fault output. Prefix an active-low fault
+#   with ! and enable a pull-up with ^ when required. This parameter must be
+#   provided.
+#shutdown_value: 0.0
+#   Logical value applied to the physical output_pin during a Klipper/MCU
+#   shutdown. It overrides the consuming output or fan section's shutdown
+#   value. Valid values are 0.0 through 1.0. Pin inversion is applied
+#   afterward. The default is 0.0.
+#error_severity: warning
+#   A "silent" fault applies the latch/retry/off policy without a message. A
+#   "warning" also logs warnings. A "critical" fault logs an error and places
+#   Klipper into shutdown after the delay.
+#fault_off_delay: 0.0
+#   Retry window in seconds. During this window the channel is toggled off
+#   and on. At expiration it remains off. The default is zero.
+#retry_interval: 1.0
+#   Seconds between retry attempts. The default is 1.0.
+#retry_toggle_delay: 0.1
+#   Seconds the channel remains off during each retry toggle. This must be less
+#   than retry_interval. The default is 0.1.
+```
+
+Use `pin: pmic_my_channel:OUT` from an output or fan section. The virtual pin
+supports digital and PWM consumers. `CLEAR_PMIC_FAULT PMIC=my_channel` clears
+the latch only after the physical fault input becomes inactive. Fault inputs
+are ignored while the logical channel is off.
+
 ### [static_pwm_clock]
 
 Static configurable output pin (one may define any number of
