@@ -37,6 +37,9 @@ class PAT9125FilamentSensor:
         self.minimum_motion = config.getfloat(
             'minimum_motion', .1, above=0.)
         self.runout_helper = filament_switch_sensor.RunoutHelper(config)
+        self.name = config.get_name().split()[-1]
+        self.configfile = self.printer.lookup_object('configfile')
+        self.calibration_start = None
         self.extruder = self.estimated_print_time = None
         self.filament_runout_pos = None
         self.pending_motion = 0.
@@ -44,6 +47,11 @@ class PAT9125FilamentSensor:
         self.sample_timer = self.reactor.register_timer(self._sample_sensor)
         self.printer.register_event_handler('klippy:ready',
                                             self._handle_ready)
+        self.gcode = self.printer.lookup_object('gcode')
+        self.gcode.register_mux_command(
+            'PAT9125_CALIBRATE', 'SENSOR', self.name,
+            self.cmd_PAT9125_CALIBRATE,
+            desc='Calibrate PAT9125 counts per millimetre')
 
     def _read_reg(self, reg, length=1):
         params = self.i2c.i2c_read([reg], length)
@@ -107,6 +115,35 @@ class PAT9125FilamentSensor:
                       / self.counts_per_mm,
         })
         return status
+
+    def cmd_PAT9125_CALIBRATE(self, gcmd):
+        action = gcmd.get('ACTION').upper()
+        counts = (self.x_counts, self.y_counts)[self.axis]
+        if action == 'START':
+            self.calibration_start = counts
+            gcmd.respond_info(
+                'PAT9125 %s calibration started at %d counts; move a known '
+                'filament length, then run ACTION=FINISH LENGTH=<mm>'
+                % (self.name, counts))
+            return
+        if action != 'FINISH':
+            raise gcmd.error('ACTION must be START or FINISH')
+        if self.calibration_start is None:
+            raise gcmd.error('Run PAT9125_CALIBRATE ACTION=START first')
+        length = gcmd.get_float('LENGTH', above=0.)
+        delta = abs(counts - self.calibration_start)
+        if not delta:
+            raise gcmd.error('PAT9125 measured no motion')
+        value = delta / length
+        self.counts_per_mm = value
+        self.calibration_start = None
+        self.configfile.set(
+            'pat9125_filament_sensor ' + self.name,
+            'counts_per_mm', '%.6f' % value)
+        gcmd.respond_info(
+            'PAT9125 %s measured %d counts over %.3fmm: %.6f counts/mm. '
+            'Run SAVE_CONFIG to store it.'
+            % (self.name, delta, length, value))
 
 
 def load_config_prefix(config):

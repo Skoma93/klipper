@@ -45,7 +45,7 @@ src-$(CONFIG_MACH_SAM4E) += atsam/sam4e_afec.c atsam/sam4_cache.c
 src-$(CONFIG_MACH_SAM3X) += ../lib/sam3x/gcc/system_sam3xa.c
 src-$(CONFIG_MACH_SAM4S) += atsam/sam4s_sysinit.c
 src-$(CONFIG_MACH_SAM4E) += ../lib/sam4e/gcc/system_sam4e.c
-src-$(CONFIG_MACH_SAME70) += atsam/same70_sysinit.c atsam/sam4e_afec.c
+src-$(CONFIG_MACH_SAME70) += atsam/same70_sysinit.c atsam/sam4e_afec.c shared_adc_endstop.c
 
 # Build the additional bin output file
 target-y += $(OUT)klipper.bin

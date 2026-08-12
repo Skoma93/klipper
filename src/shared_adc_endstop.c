@@ -7,7 +7,7 @@
 #include "basecmd.h" // oid_alloc
 #include "board/gpio.h" // gpio_in_read
 #include "board/irq.h" // irq_disable
-#include "board/misc.h" // timer_read_time
+#include "board/misc.h" // timer_from_us
 #include "command.h" // DECL_COMMAND
 #include "sched.h" // struct timer
 #include "trsync.h" // trsync_do_trigger
@@ -21,7 +21,7 @@ struct shared_adc_endstop {
     uint32_t adc_sum;
     struct trsync *ts;
     uint16_t adc_value;
-    uint8_t adc_sample_count, adc_count;
+    uint8_t adc_sample_count, adc_count, endstop_sample_count;
     uint8_t flags, trigger_count, trigger_reason;
 };
 
@@ -34,6 +34,17 @@ enum {
 static struct task_wake shared_adc_wake;
 
 static uint_fast8_t shared_endstop_oversample_event(struct timer *timer);
+
+// PIO_PDSR is synchronized to the peripheral clock.  Allow that synchronizer
+// and the configured pull resistor to settle after changing an analog pin back
+// to PIO control before servicing an immediate state query.
+static void
+shared_gpio_settle(void)
+{
+    uint32_t end = timer_read_time() + timer_from_us(10);
+    while (timer_is_before(timer_read_time(), end))
+        ;
+}
 
 static uint_fast8_t
 shared_adc_event(struct timer *timer)
@@ -85,7 +96,7 @@ shared_endstop_oversample_event(struct timer *timer)
     if ((val ? ~s->flags : s->flags) & SAE_PIN_HIGH) {
         s->timer.func = shared_endstop_event;
         s->timer.waketime = s->endstop_next;
-        s->trigger_count = s->adc_sample_count;
+        s->trigger_count = s->endstop_sample_count;
         return SF_RESCHEDULE;
     }
     if (!--s->trigger_count) {
@@ -155,7 +166,7 @@ command_shared_endstop_home(uint32_t *args)
     gpio_in_reset(s->digital, args[8]);
     s->timer.waketime = args[1];
     s->endstop_sample_time = args[2];
-    s->adc_sample_count = args[3];
+    s->endstop_sample_count = args[3];
     s->endstop_rest_time = args[4];
     s->timer.func = shared_endstop_event;
     s->trigger_count = args[3];
@@ -177,11 +188,23 @@ command_shared_endstop_query_state(uint32_t *args)
         oid, command_config_shared_adc_endstop);
     uint8_t flags = s->flags;
     uint8_t temporary = !(flags & SAE_DIGITAL);
-    if (temporary)
+    if (temporary) {
+        sched_del_timer(&s->timer);
+        gpio_adc_cancel_sample(s->adc);
+        s->flags &= ~SAE_ADC_READY;
         gpio_in_reset(s->digital, args[1]);
+        shared_gpio_settle();
+    }
     uint8_t value = gpio_in_read(s->digital);
-    if (temporary)
+    if (temporary) {
         gpio_adc_restore(s->adc);
+        if (s->adc_sample_count) {
+            s->adc_next = timer_read_time() + s->adc_rest_time;
+            s->timer.func = shared_adc_event;
+            s->timer.waketime = s->adc_next;
+            sched_add_timer(&s->timer);
+        }
+    }
     sendf("shared_endstop_state oid=%c homing=%c next_clock=%u"
           " pin_value=%c", oid, !!(flags & SAE_DIGITAL),
           s->endstop_next, value);

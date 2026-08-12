@@ -162,6 +162,29 @@ enabling automatic calibration.
 - **AXIS:** Define the axis (`X` or `Y`) for which the twist compensation
 will be calibrated. If not specified, the axis defaults to `'X'`.
 
+### [bed_presence]
+
+The following commands are available when a
+[bed_presence config section](Config_Reference.md#bed_presence) is enabled.
+
+#### SET_BED_PRESENCE
+`SET_BED_PRESENCE ENABLE=<0|1>`: Enables or disables automatic
+bed-presence enforcement. When disabled, ADC voltage and presence state
+continue to update and the shared digital endstop remains available, but bed
+absence does not request PAUSE. The setting returns to the configured default
+after a Klipper restart.
+
+#### QUERY_BED_PRESENCE
+`QUERY_BED_PRESENCE`: Reports present, absent, or unknown state, the latest
+voltage, ADC or digital mode, and whether automatic enforcement is enabled.
+
+#### REQUIRE_BED_PRESENT
+`REQUIRE_BED_PRESENT`: Raises a command error unless a valid ADC sample
+indicates that the bed is present. Place it before protected operations or at
+the beginning of a macro to abort the remaining G-Code when the bed is absent,
+unknown, or PC27 is temporarily in digital mode. This explicit check still
+works when automatic enforcement is disabled.
+
 ### [bed_mesh]
 
 The following commands are available when the
@@ -1750,6 +1773,24 @@ potentially cause upward tool movement as the adjustment is updated and applied.
 the config. `REF_TEMP` manually overrides the reference temperature typically
 set during homing (for use in e.g. non-standard homing routines) - will be reset
 automatically upon homing.
+
+### IDEX contact calibration
+
+The `[idex_xy_calibration]` module provides `CALIBRATE_BED_EDGES`,
+`CALIBRATE_IDEX_Z_OFFSET`, `CHECK_BUILD_PLATE_ORIENTATION`,
+`IDEX_XY_CALIBRATE`, `QUERY_BED_CONTACT`, and
+`QUERY_IDEX_XY_CALIBRATION`. Motion commands require
+XYZ homed, an idle printer, and a present bed. Reported offsets use
+right-minus-left sign and are not applied automatically.
+
+The `[flow_z_reference]` module provides `CALIBRATE_LOWER_Z_REFERENCE`,
+`HOME_Z_FROM_LOWER_REFERENCE`, and `QUERY_FLOW_Z_REFERENCE`. Lower-reference
+homing is for recovery near the lower switch, not normal Z homing.
+
+`PAT9125_CALIBRATE SENSOR=<name> ACTION=START` records the selected sensor
+counter. After moving a known filament length,
+`PAT9125_CALIBRATE SENSOR=<name> ACTION=FINISH LENGTH=<mm>` calculates and stages
+`counts_per_mm` for `SAVE_CONFIG`.
 
 ### [z_tilt]
 

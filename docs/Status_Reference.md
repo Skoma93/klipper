@@ -19,6 +19,20 @@ The following information is available in
   angle sensor is a tle5012b chip and if measurements are in progress
   (otherwise it reports `None`).
 
+## bed_presence
+
+The following information is available in the bed_presence object:
+
+- enabled: True when automatic bed-absence print enforcement is enabled.
+- voltage: The latest ADC voltage, or null before the first sample.
+- state: The ADC classification: unknown, error, present, or missing.
+- present: True when the bed is present, false when absent, or null while the
+  state is not yet known.
+- monitoring: True while ADC bed-presence monitoring is enabled.
+- digital_mode: True while PC27 is owned by native digital endstop probing.
+- pause_requested: True after bed absence has requested a print pause.
+- last_sample_time: The estimated print time of the latest ADC sample.
+
 ## bed_mesh
 
 The following information is available in the
@@ -692,6 +706,17 @@ object is available if z_tilt is defined):
   successfully.
 
 ## Accessing Coordinates
+
+### idex_xy_calibration
+
+The `idex_xy_calibration` object exposes `state`, `running`, `last_error`,
+`left`, `right`, `offset`, `bed_edges`, and `z_offset`. Offsets are right minus
+left and values are in millimetres.
+
+### flow_z_reference
+
+The `flow_z_reference` object exposes `lower_position`, `last_measured`, and
+`last_action`.
 
 Some status fields provide a "coordinate". For macro users these
 fields may be accessed by component name

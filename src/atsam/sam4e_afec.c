@@ -179,6 +179,16 @@ gpio_adc_setup(uint8_t pin)
 enum { AFE_DUMMY=0xff };
 uint8_t active_channel = AFE_DUMMY;
 
+// Restore an ADC pin after it has temporarily been used as a digital input.
+void
+gpio_adc_restore(struct gpio_adc g)
+{
+    Afec *afec = gpio_adc_to_afec(g);
+    uint32_t afec_chan = gpio_adc_to_afec_chan(g);
+    afec->AFE_CHER = 1 << afec_chan;
+    gpio_peripheral(afec_pins[g.chan], 'A', 0);
+}
+
 // Try to sample a value. Returns zero if sample ready, otherwise
 // returns the number of clock ticks the caller should wait before
 // retrying this function.
@@ -235,6 +245,9 @@ gpio_adc_read(struct gpio_adc g)
 void
 gpio_adc_cancel_sample(struct gpio_adc g)
 {
+    Afec *afec = gpio_adc_to_afec(g);
+    uint32_t afec_chan = gpio_adc_to_afec_chan(g);
+    afec->AFE_CHDR = 1 << afec_chan;
     if (active_channel == g.chan) {
         active_channel = AFE_DUMMY;
     }

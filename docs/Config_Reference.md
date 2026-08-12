@@ -5891,6 +5891,44 @@ host_mcu:
 #   (True sets CFG5 high, False sets it low). The default is True.
 ```
 
+## Bed presence
+
+### [bed_presence]
+
+Bed-presence monitoring on a SAME70 pin that is temporarily switched to a
+native digital endstop during probing. The module exposes
+bed_presence:virtual_endstop. ADC monitoring is disabled while that endstop
+is active and resumes when probing finishes. An absent bed requests PAUSE
+when Klipper enters or remains in the printing state.
+
+This module currently requires a SAME70 micro-controller firmware build that
+includes shared ADC/endstop support.
+
+    [bed_presence]
+    pin:
+    #   ADC-capable SAME70 pin used for both bed presence and digital probing.
+    #   This parameter must be provided. Prefix with ! to invert the digital
+    #   endstop level and with ^ or ~ to select a digital-mode pull resistor.
+    #enabled: True
+    #   Enable automatic print-pause enforcement. When False, voltage and
+    #   presence state continue to update and explicit REQUIRE_BED_PRESENT
+    #   checks still work, but bed absence does not request PAUSE. The default
+    #   is True.
+    #adc_voltage: 3.3
+    #   ADC reference voltage used to report the pin voltage.
+    present_min_voltage:
+    #   Voltage at or above which the bed-present range begins. Lower values
+    #   are reported as an error, such as a possible short circuit. This
+    #   parameter must be provided.
+    present_max_voltage:
+    #   Highest voltage considered bed present. Higher values are reported as
+    #   bed missing. This parameter must be provided and must be greater than
+    #   or equal to present_min_voltage.
+
+To use PC27 for a standard probe, configure
+pin: bed_presence:virtual_endstop in [probe]. Probe geometry, offsets, speed,
+and sample settings remain ordinary [probe] parameters.
+
 ## Other Custom Modules
 
 ### [palette2]
@@ -6032,3 +6070,48 @@ All other Klipper micro-controllers use a
 #   to 100000 and changing this value has no effect. The default is
 #   100000. Linux, RP2040 and ATmega support 400000.
 ```
+
+## IDEX contact calibration
+
+### [idex_xy_calibration]
+
+Measures build-plate edges and a circular reference feature with two IDEX
+nozzles through a digital endstop. Required geometry consists of
+`right_edge_start`, `right_edge_target`, `edge_scan_z`, `safe_z`,
+`z_probe_target`, and `hole_search_distance`. Optional geometry includes
+`left_edge_start` (6), `left_edge_target` (0), `edge_y` (10), `hole_y` (8),
+`surface_inset` (15), `hole_inset` (215), `hole_depth` (3), and plate-check
+coordinates. Preparation, activation, finish, and abort G-Code scripts and all
+travel/probe speeds, retracts, sample counts, and tolerances are configurable.
+`temporary_x_min` and `temporary_x_max` default to the edge-search targets and
+apply only while a calibration command is running; normal X limits are restored
+after success or error.
+`left_reference_edge` (0) and `right_reference_edge` (446) provide fixed edges
+for standalone IDEX Z-offset calibration when no measured edges are available.
+`left_z_test_x` (15), `right_z_test_x` (431), and `z_test_y` (10) explicitly
+select the standalone T0 and T1 surface-contact positions.
+`z_release_step` (0.05) controls how far Z retracts per check after surface
+contact; retraction stops as soon as the digital input releases and is bounded
+by `z_retract` (1). Z samples and their stability comparison use this release
+coordinate, not the initial contact coordinate, so filament on the nozzle does
+not define the reference. `cleaning_half_range` (0.5), `cleaning_cycles` (3),
+and `cleaning_speed` (5 mm/s) oscillate the touching nozzle between X-0.5 and
+X+0.5 to remove filament. If cleaning releases contact, the clean nozzle is
+touched again before measuring its Z release. `contact_dwell` (0) optionally
+adds a stationary hold, and `nozzle_wipe_distance` (1) optionally adds a final
+mirrored X wipe. `left_park_x` (0) and `right_park_x` (446) park the active
+carriage at safe Z before its finish script and before activating the other
+carriage. A result is accepted only when the total spread of the configured
+`stable_samples` window is no greater than `z_tolerance`.
+
+### [flow_z_reference]
+
+Calibrates and recovery-homes against a second encounter with the normal Z
+endstop on machines that use the same switch at both ends of travel.
+`search_start` and a larger `search_target` are required. Optional
+`temporary_position_max` defaults to `search_target`, must be at least as large,
+and applies only while a lower-reference command is running.
+`calibration_return_position` (10) selects the normal-range Z position used
+after successful calibration. Other optional settings are `lower_position`,
+`travel_speed` (50), `speed` (5),
+`retract_distance` (2), `recovery_release_distance` (10), and `second_speed`.
