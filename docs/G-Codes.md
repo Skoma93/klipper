@@ -1777,20 +1777,44 @@ automatically upon homing.
 ### IDEX contact calibration
 
 The `[idex_xy_calibration]` module provides `CALIBRATE_BED_EDGES`,
-`CALIBRATE_IDEX_Z_OFFSET`, `CHECK_BUILD_PLATE_ORIENTATION`,
+`CALIBRATE_IDEX_Z_OFFSET`, `CALIBRATE_BLTOUCH_NOZZLE_OFFSET`,
+`CHECK_BUILD_PLATE_ORIENTATION`,
 `IDEX_XY_CALIBRATE`, `QUERY_BED_CONTACT`, and
 `QUERY_IDEX_XY_CALIBRATION`. Motion commands require
 XYZ homed, an idle printer, and a present bed. Reported offsets use
 right-minus-left sign and are not applied automatically.
+At the configured edge scan height, a released contact input first causes an
+inward surface-acquisition move; the tool then moves outward until contact
+releases to record the plate edge.
+`CALIBRATE_IDEX_Z_OFFSET` first probes the configured BLTouch/nozzle reference,
+then measures the same physical point with T0 and stages the resulting
+`[bltouch] z_offset`. It then performs the T0/T1 nozzle measurement. Run
+`SAVE_CONFIG` after a successful sequence to persist the BLTouch value.
+`CALIBRATE_BLTOUCH_NOZZLE_OFFSET` performs only the BLTouch-first and T0-nozzle
+measurement and stages the same `[bltouch] z_offset` for `SAVE_CONFIG`.
+`START_FLOW_THREE_POINT_CALIBRATION` starts continuous BLTouch sampling of the
+three configured physical points. A point advances when it is within the
+configured tolerance of absolute Z0 and the operator presses the prompt's Next
+button. Sampling continues while Next is displayed; the button is removed if
+the latest value leaves tolerance. Every sample also reports its signed error
+and calculated CW/CCW angle to the console. After all adjustment points pass,
+one automatic complete recheck must
+succeed without an intervening adjustment. `FLOW_THREE_POINT_NEXT` advances a
+passing adjustment point, `FLOW_THREE_POINT_SAMPLE` is the scheduled sampling
+step, and
+`ABORT_FLOW_THREE_POINT_CALIBRATION` stops the sequence. Compatible frontends
+may process `action:prompt_update` to replace the open prompt's text in place.
 
 The `[flow_z_reference]` module provides `CALIBRATE_LOWER_Z_REFERENCE`,
 `HOME_Z_FROM_LOWER_REFERENCE`, and `QUERY_FLOW_Z_REFERENCE`. Lower-reference
 homing is for recovery near the lower switch, not normal Z homing.
 
-`PAT9125_CALIBRATE SENSOR=<name> ACTION=START` records the selected sensor
+`FMS_SENSOR_CALIBRATE SENSOR=<name> ACTION=START` records the selected sensor
 counter. After moving a known filament length,
-`PAT9125_CALIBRATE SENSOR=<name> ACTION=FINISH LENGTH=<mm>` calculates and stages
-`counts_per_mm` for `SAVE_CONFIG`.
+`FMS_SENSOR_CALIBRATE SENSOR=<name> ACTION=FINISH LENGTH=<mm>` calculates and stages
+`counts_per_mm` for `SAVE_CONFIG`. `ACTION=QUERY` reports the product ID, raw
+axis counters, active scale, programmed X/Y resolution, and calibration state
+without changing them.
 
 ### [z_tilt]
 

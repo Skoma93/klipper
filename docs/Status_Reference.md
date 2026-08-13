@@ -218,6 +218,13 @@ The following information is available in
 - `x_counts`: Total signed X displacement counts since Klipper became ready.
 - `y_counts`: Total signed Y displacement counts since Klipper became ready.
 - `motion`: Total signed displacement in millimeters on the configured axis.
+- `counts_per_mm`: Current configured or runtime-calibrated sensor scale.
+- `calibrating`: True between `FMS_SENSOR_CALIBRATE ACTION=START` and a successful
+  `ACTION=FINISH`.
+- `product_id`: Two-byte PAT9125 product ID after hardware initialization, or
+  null before Klipper is ready.
+- `x_resolution`, `y_resolution`: Resolution-register values programmed during
+  sensor initialization.
 
 ## firmware_retraction
 
@@ -711,7 +718,17 @@ object is available if z_tilt is defined):
 
 The `idex_xy_calibration` object exposes `state`, `running`, `last_error`,
 `left`, `right`, `offset`, `bed_edges`, and `z_offset`. Offsets are right minus
-left and values are in millimetres.
+left and values are in millimetres. `bl_probe_z`, `bl_nozzle_z`, and
+`bl_z_offset` contain the most recent automatic BLTouch/nozzle calibration
+measurements and staged probe offset.
+`three_point_running`, `three_point_phase`, `three_point_index`, and
+`three_point_results` report the continuous three-point adjustment state and
+latest absolute Z measurements. `three_point_sample_count` increments after
+every completed probe cycle.
+`three_point_validation_pass` reports whether the required uninterrupted
+validation round has completed. `three_point_waiting_for_next` is true when the
+current adjustment point passed and the controller is waiting for the prompt's
+Next button.
 
 ### flow_z_reference
 

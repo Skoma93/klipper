@@ -5367,6 +5367,10 @@ jam.
     #   Calibrated sensor counts per millimeter. This is required.
     #axis: y
     #   Measurement axis aligned with filament travel: x or y. Default y.
+    #x_resolution: 240
+    #y_resolution: 240
+    #   Values written to the PAT9125 X and Y resolution registers after a
+    #   sensor reset. Each must be from 0 through 255. Defaults are 240.
     #detection_length: 7.0
     #   Commanded extrusion without motion before runout. Default 7 mm.
     #minimum_motion: 0.1
@@ -6080,7 +6084,8 @@ nozzles through a digital endstop. Required geometry consists of
 `right_edge_start`, `right_edge_target`, `edge_scan_z`, `safe_z`,
 `z_probe_target`, and `hole_search_distance`. Optional geometry includes
 `left_edge_start` (6), `left_edge_target` (0), `edge_y` (10), `hole_y` (8),
-`surface_inset` (15), `hole_inset` (215), `hole_depth` (3), and plate-check
+`edge_depth` (1), `surface_inset` (15), `hole_inset` (215), `hole_z_inset`
+(10), `hole_depth` (1), and plate-check
 coordinates. Preparation, activation, finish, and abort G-Code scripts and all
 travel/probe speeds, retracts, sample counts, and tolerances are configurable.
 `temporary_x_min` and `temporary_x_max` default to the edge-search targets and
@@ -6088,8 +6093,35 @@ apply only while a calibration command is running; normal X limits are restored
 after success or error.
 `left_reference_edge` (0) and `right_reference_edge` (446) provide fixed edges
 for standalone IDEX Z-offset calibration when no measured edges are available.
-`left_z_test_x` (15), `right_z_test_x` (431), and `z_test_y` (10) explicitly
-select the standalone T0 and T1 surface-contact positions.
+`left_z_test_x` (22), `right_z_test_x` (431), and `z_test_y` (10) explicitly
+select the standalone T0 and T1 surface-contact positions. The full XY workflow
+uses the same X coordinates but always uses `edge_y` for its surface reference,
+so the reference and subsequent edge scan share one Y line. It measures surface
+Z first and performs its edge scan
+`edge_depth` millimetres toward `z_probe_target` from that measured release
+coordinate. The edge-only command uses absolute `edge_scan_z` instead.
+After finding the edge, the full XY workflow measures a second local surface Z
+`hole_z_inset` millimetres in negative X from the calculated hole center for
+both tools; the hole scan depth is relative to this local measurement.
+`bl_nozzle_reference_x` (20 mm left of `left_z_test_x`) and
+`bl_nozzle_reference_y` (`z_test_y`) select the physical point used to
+calibrate the probe against the T0 nozzle. `bl_nozzle_x_offset` and
+`bl_nozzle_y_offset` (both 0) are subtracted from that point for the probe
+carriage position; the nozzle measurement uses the unshifted point. This
+matches Klipper's convention that probe bed coordinates equal carriage
+coordinates plus the configured probe XY offsets.
+`bl_nozzle_prepare_gcode` defaults to `left_prepare_gcode` and may select a
+T0-only heating and cleaning sequence for the BLTouch/nozzle measurement.
+`bl_nozzle_start_gcode` (empty) may start T0 heating before the BLTouch probe;
+the preparation hook can then wait for temperature and clean the nozzle.
+`three_point_positions` defaults to three physical bed points, and
+`three_point_names` supplies their display names. Exactly three values are
+required. `three_point_target` (0), `three_point_tolerance` (0.05), and
+`three_point_screw_pitch` (0.7 mm for M4) configure continuous absolute-Z bed
+adjustment guidance. `three_point_samples` (1) selects how many physical probe
+samples form each popup update; one provides the fastest continuous feedback.
+After the adjustment pass succeeds, the workflow requires two uninterrupted
+full validation passes; a failed validation point resets that count.
 `z_release_step` (0.05) controls how far Z retracts per check after surface
 contact; retraction stops as soon as the digital input releases and is bounded
 by `z_retract` (1). Z samples and their stability comparison use this release
