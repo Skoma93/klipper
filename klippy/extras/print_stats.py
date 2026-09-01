@@ -6,7 +6,7 @@
 
 class PrintStats:
     def __init__(self, config):
-        printer = config.get_printer()
+        printer = self.printer = config.get_printer()
         self.gcode_move = printer.load_object(config, 'gcode_move')
         self.reactor = printer.get_reactor()
         self.reset()
@@ -43,6 +43,7 @@ class PrintStats:
         self.last_epos = gc_status['position'].e
         self.state = "printing"
         self.error_message = ""
+        self.printer.send_event("print_stats:state_changed", self.state)
     def note_pause(self):
         if self.last_pause_time is None:
             curtime = self.reactor.monotonic()
@@ -51,6 +52,7 @@ class PrintStats:
             self._update_filament_usage(curtime)
         if self.state != "error":
             self.state = "paused"
+            self.printer.send_event("print_stats:state_changed", self.state)
     def note_complete(self):
         self._note_finish("complete")
     def note_error(self, message):
@@ -62,6 +64,7 @@ class PrintStats:
             return
         self.state = state
         self.error_message = error_message
+        self.printer.send_event("print_stats:state_changed", self.state)
         eventtime = self.reactor.monotonic()
         self.total_duration = eventtime - self.print_start_time
         if self.filament_used < 0.0000001:
@@ -87,6 +90,8 @@ class PrintStats:
                 current_layer is not None and \
                 current_layer != self.info_current_layer:
             self.info_current_layer = min(current_layer, self.info_total_layer)
+            self.printer.send_event(
+                "print_stats:layer_changed", self.info_current_layer)
     def reset(self):
         self.filename = self.error_message = ""
         self.state = "standby"

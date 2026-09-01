@@ -501,6 +501,18 @@ class IdexXYCalibration:
                self.bl_nozzle_reference_y - self.bl_nozzle_y_offset,
                probe_result.bed_z, nozzle_z, z_offset))
 
+    def _persist_idex_offsets(self):
+        if self.offset is None or self.z_offset is None:
+            return
+        self._run_script(
+            'SAVE_VARIABLE VARIABLE=idex_t1_x_offset VALUE=%.10f\n'
+            'SAVE_VARIABLE VARIABLE=idex_t1_y_offset VALUE=%.10f\n'
+            'SAVE_VARIABLE VARIABLE=idex_t1_z_offset VALUE=%.10f\n'
+            'SAVE_VARIABLE VARIABLE=idex_bltouch_z_offset VALUE=%.10f\n'
+            'SAVE_VARIABLE VARIABLE=idex_offsets_valid VALUE=1'
+            % (self.offset['x'], self.offset['y'], self.z_offset,
+               self.bl_z_offset))
+
     def _preflight(self):
         toolhead = self.printer.lookup_object('toolhead')
         eventtime = self.printer.get_reactor().monotonic()
@@ -594,6 +606,7 @@ class IdexXYCalibration:
             left_z = self._measure_tool_z(0, self.bed_edges['left'])
             right_z = self._measure_tool_z(1, self.bed_edges['right'])
             self.z_offset = right_z - left_z
+            self._persist_idex_offsets()
             self.printer.lookup_object('configfile').set(
                 'bltouch', 'z_offset', '%.3f' % (self.bl_z_offset,))
             gcmd.respond_info(

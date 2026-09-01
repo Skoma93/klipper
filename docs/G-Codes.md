@@ -408,6 +408,76 @@ carriages: it is set to match the actual position of the activated primary
 carriage of an axis or, if an axis does not have a saved primary carriage,
 to the axis position when `SAVE_DUAL_CARRIAGE_STATE` command was called.
 
+### [flow_idex_modes]
+
+The following commands are available when the
+[flow_idex_modes config section](Config_Reference.md#flow_idex_modes) is
+enabled.
+
+#### SET_FLOW_MODE
+
+`SET_FLOW_MODE MODE=<NORMAL|PARALLEL|MIRROR|BACKUP> [TOOL=<0|1>]
+[SEPARATION=<mm>] [FIRST_LAYER_HEIGHT=<mm>] [DEFER=<0|1>]
+[ADAPTIVE_MESH=<0|1>] [ADAPTIVE_MARGIN=<mm>]
+[ADAPTIVE_BED_TEMP=<degrees_C>]
+[ADAPTIVE_BED_STABILIZATION_TIME=<seconds>]`:
+Select a guarded
+IDEX mode. With `DEFER=1`, validate and queue the selection without requiring
+homed axes, then activate it after the next complete `G28`. This is intended
+for starting files that perform their own homing.
+Immediate activation requires all axes to be homed. PARALLEL and MIRROR
+require `FIRST_LAYER_HEIGHT` and
+may use a flat-bed baseline without a mesh. Select a synchronized mode before
+adaptive `BED_MESH_CALIBRATE` so an optional mesh covers both print areas.
+During synchronized adaptive probing, H1 is physically parked and inactive;
+H0 alone probes the expanded two-area bounds. COPY/MIRROR motion is restored
+after probing and post-mesh parking.
+`ADAPTIVE_MESH=1` schedules adaptive calibration after mode activation. With
+`DEFER=1`, calibration starts immediately after the file's complete homing
+cycle. Only the bed is heated; calibration begins after its `M190` wait and a
+bed-stabilization delay. `ADAPTIVE_BED_TEMP` is required with
+`ADAPTIVE_MESH=1`. `ADAPTIVE_BED_STABILIZATION_TIME` optionally overrides the
+configured stabilization duration; set it to zero to skip the delay. The
+file must define printable objects; objectless files are rejected instead of
+silently probing a full mesh. `ADAPTIVE_MARGIN` optionally overrides the
+configured adaptive margin. The mesh active before calibration is retained in memory and restored
+when the print completes, is cancelled, or ends with an error.
+While adaptive calibration is pending, nozzle temperature requests are held
+with both nozzle targets at zero. The latest requested targets are applied
+after probing succeeds; an `M109` wait is also deferred until that point.
+After probing and before nozzle heating, both heads move to their configured X
+park positions and the configured shared adaptive park Y position.
+Cancellation or calibration failure discards the held requests and leaves the
+nozzle targets at zero.
+Calibrated offsets are required only when `require_calibrated_offsets` is
+enabled.
+
+#### SET_FLOW_LAYER
+
+`SET_FLOW_LAYER LAYER=<number>`: Report the current layer when the print does
+not use `SET_PRINT_STATS_INFO`. Layer two and later disable first-layer flow
+compensation.
+
+#### PARK_FLOW_HEADS
+
+`PARK_FLOW_HEADS [X=<left_x>] [Y=<shared_y>] [SPEED=<mm/s>]`: Park the FLOW
+IDEX heads for a paused print. In Mirror and Parallel modes, H1 is parked at
+its configured right park position before H0 moves to `X`; both use the shared
+`Y`. In Normal and Backup modes, the active head moves to its corresponding
+park while the inactive head remains parked. XYZ must be homed.
+
+#### CLEAN_FLOW_HEADS
+
+`CLEAN_FLOW_HEADS`: Run the configured nozzle-cleaning routine for the active
+head in Normal or Backup mode, or for both heads in Parallel or Mirror mode.
+The original active extruder and synchronized COPY/MIRROR carriage state are
+restored after cleaning. XYZ must be homed.
+
+#### RESET_FLOW_FAILOVER
+
+`RESET_FLOW_FAILOVER`: Clear a latched BACKUP failover while the printer is
+idle. The command is rejected during printing or while paused.
+
 ### [endstop_phase]
 
 The following commands are available when an
@@ -989,6 +1059,30 @@ QUERY_ENDSTOPS and QUERY_PROBE for load cell probes.
 - `TIMEOOUT`: the time, in seconds, that the tool waits for each tab before
   aborting.
 
+### [continuous_extrusion]
+
+The following commands are available when a
+[continuous_extrusion config section](Config_Reference.md#continuous_extrusion)
+is enabled.
+
+#### MANUAL_EXTRUDE_START
+
+`MANUAL_EXTRUDE_START CLIENT=<id> DIRECTION=<-1|1> SPEED=<mm/s>`: Start
+continuous manual extrusion on the active extruder. The extruder must be hot
+enough and the printer must not be printing or paused.
+
+#### MANUAL_EXTRUDE_KEEPALIVE
+
+`MANUAL_EXTRUDE_KEEPALIVE CLIENT=<id>`: Refresh and extend an active session.
+The client must send this command often enough to keep the short motion queue
+supplied.
+
+#### MANUAL_EXTRUDE_STOP
+
+`MANUAL_EXTRUDE_STOP CLIENT=<id>`: Release the session and stop adding motion.
+Motion already present in the short queue cannot be cancelled and drains in no
+more than the configured `queue_horizon` under normal operation.
+
 ### [manual_probe]
 
 The manual_probe module is automatically loaded.
@@ -1195,12 +1289,13 @@ in the config file.
 
 #### PID_CALIBRATE
 `PID_CALIBRATE HEATER=<config_name> TARGET=<temperature>
-[WRITE_FILE=1]`: Perform a PID calibration test. The specified heater
+[WRITE_FILE=1] [MAX_ERROR=<degrees>]`: Perform a PID calibration test. The specified heater
 will be enabled until the specified target temperature is reached, and
 then the heater will be turned off and on for several cycles. If the
 WRITE_FILE parameter is enabled, then the file /tmp/heattest.txt will
 be created with a log of all temperature samples taken during the
-test.
+test. If MAX_ERROR is provided, the heater verification cumulative-error
+limit is temporarily changed for this calibration and restored afterward.
 
 ### [print_stats]
 
@@ -1816,6 +1911,31 @@ counter. After moving a known filament length,
 axis counters, active scale, programmed X/Y resolution, and calibration state
 without changing them.
 
+`SET_FMS_SENSITIVITY SENSOR=<name> [FLOW=<percent>] [DISTANCE=<mm>]` sets the
+runtime minimum measured-flow percentage and/or net-forward evaluation-window
+length. `FLOW` must be from 1 through 100 percent and `DISTANCE` from 0.2
+through 20 mm. Retractions and recovery to the previous extrusion high-water
+mark are ignored. Each window is independent, so a stable proportional
+difference does not accumulate across a print. Settings are not persisted and
+return to `minimum_flow` and `detection_length` after a Klipper restart.
+
+### [fms_recovery]
+
+The following commands are available when the
+[fms_recovery](Config_Reference.md#fms_recovery) section is enabled:
+
+`START_FMS_RECOVERY SENSOR=<name>` starts recovery for a configured PAT9125
+sensor. The printer must be paused, the sensor must match the hot active
+extruder, XYZ must be homed, and cleaning clearance must be available. Success
+cleans, restores the paused position, resets the watchdog, and resumes. Failure
+leaves the print paused. With configured `pause_x` and `pause_y`, every FLOW
+mode parks before recovery: NORMAL/BACKUP use the active tool's end park and
+MIRROR/PARALLEL temporarily separate and park both X carriages at opposite
+ends. Success restores saved state and failure leaves them parked there.
+
+`ABORT_FMS_RECOVERY` prevents further recovery moves after the currently queued
+move and leaves the print paused.
+
 ### [z_tilt]
 
 The following commands are available when the
@@ -1829,3 +1949,27 @@ independent adjustments to each Z stepper to compensate for tilt. See
 the PROBE command for details on the optional probe parameters. The
 optional `RETRIES`, `RETRY_TOLERANCE`, and `HORIZONTAL_MOVE_Z` values
 override those options specified in the config file.
+
+### [continuous_jog]
+
+The following commands are available when a [continuous_jog config
+section](Config_Reference.md#continuous_jog) is enabled:
+
+#### MANUAL_JOG_START
+
+`MANUAL_JOG_START CLIENT=<client> X=<direction> Y=<direction> Z=<direction>
+SPEED=<mm/s>`: Start or refresh a client-owned continuous XYZ jog. Direction
+components are in the range -1 through 1 and are normalized as a vector. At
+least one component must be nonzero. Requested axes must be homed, and the
+command is rejected while printing or paused.
+
+#### MANUAL_JOG_KEEPALIVE
+
+`MANUAL_JOG_KEEPALIVE CLIENT=<client>`: Extend the active jog and top up its
+short motion queue. The client must match the owner supplied at start.
+
+#### MANUAL_JOG_STOP
+
+`MANUAL_JOG_STOP CLIENT=<client>`: Stop extending the active jog and release
+client ownership. Motion already delivered to the MCU may complete through the
+configured queue horizon.

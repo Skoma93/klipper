@@ -2614,6 +2614,60 @@ Note that `SHAPER_TYPE_Y` and `SHAPER_FREQ_Y` must be the same in both
 commands in this case, since the same motors drive Y axis when either
 of the `carriage_x` and `carriage_u` carriages are active.
 
+### [flow_idex_modes]
+
+Guarded FLOW two-nozzle operation for a Cartesian IDEX printer. This module
+requires `[dual_carriage]`, `[bed_mesh]`, `[save_variables]`, `extruder`, and
+`extruder1`. Calibrated T1-minus-T0 X/Y/Z offsets are read from saved variables.
+
+```
+[flow_idex_modes]
+#left_park_x: 0
+#right_park_x: 446
+#parallel_separation: 223
+#travel_speed: 100
+#minimum_gap_ratio: 0.5
+#layer_z_tolerance: 0.05
+#   Minimum commanded Z increase, in mm, on a positive XY deposition move
+#   before first-layer flow compensation is disabled. Travel and Z-hop moves
+#   are ignored. The default is 0.05.
+#adaptive_bed_stabilization_time: 60
+#   Seconds to wait after the adaptive-mesh bed target is reached before
+#   probing, allowing the bed temperature to equalize. The default is 60.
+#adaptive_park_y: 155
+#   Shared Y position used to park both heads after adaptive probing and
+#   before deferred nozzle heating begins. The default is 155.
+#offset_prefix: idex_t1
+#require_calibrated_offsets: False
+#   If True, reject mode selection until saved offsets are valid. The default
+#   permits operation with zero X/Y/Z offsets when calibration is unavailable;
+#   offsets_valid remains false in status.
+#sensors: h0_filament, h1_filament
+#cleaning_gcodes: NOZZLE_CLEANING, NOZZLE_CLEANING
+#prime_distance: 5
+#prime_speed: 1.5
+```
+
+In PARALLEL and MIRROR modes, the module evaluates the bed mesh at both
+physical nozzle locations. It uses the midpoint of the two required Z
+corrections, clamps the first-layer nozzle gaps to
+`first_layer_height * minimum_gap_ratio`, and independently scales positive
+first-layer deposition for each extruder. Retractions are not scaled. Normal
+flow is restored at layer two. Layer two is automatically detected from
+positive XY deposition above the first-layer commanded Z, so Z-hop and mesh
+variation are ignored. Adaptive meshes cover the union of both
+physical print areas while a synchronized mode is selected.
+The saved Z value is T1-minus-T0 and is subtracted when converted into H1's
+required bed correction; a negative saved value therefore represents H1 being
+physically closer to the bed.
+MIRROR and PARALLEL may print without a loaded mesh, in which case they use the
+flat-bed baseline. The controller still applies half the calibrated head Z
+mismatch to shared Z, clamps both first-layer nozzle gaps, and derives the two
+first-layer flow factors. `SET_FLOW_MODE ... DEFER=1` queues activation until
+the next complete homing operation for files that contain their own `G28`.
+M104 and M109 commands in PARALLEL/MIRROR set both hotends to the same target;
+M109 waits for both.
+
 It is worth noting that `generic_cartesian` kinematic can support two
 dual carriages for X and Y axes. For reference, see for instance a
 [sample](../config/sample-corexyuv.cfg) of CoreXYUV configuration.
@@ -3354,6 +3408,21 @@ a shutdown_speed equal to max_power.
 #   range. This replaces heater_temp/fan_speed on-off control.
 ```
 
+### [continuous_extrusion]
+
+Watchdog-controlled manual extrusion for press-and-hold user interfaces.
+
+```
+[continuous_extrusion]
+#queue_horizon: 0.300
+#   Maximum time, in seconds, of continuous extrusion kept in the motion
+#   queue. The default is 0.300 seconds.
+#watchdog_timeout: 0.600
+#   Time, in seconds, after the last start or keepalive before the active
+#   client releases ownership. This must exceed queue_horizon. The default is
+#   0.600 seconds.
+```
+
 ### [controller_fan]
 
 Controller cooling fan (one may define any number of sections with a
@@ -3696,6 +3765,29 @@ PCA9632 LED support. The PCA9632 is used on the FlashForge Dreamer.
 #initial_BLUE: 0.0
 #initial_WHITE: 0.0
 #   See the "led" section for information on these parameters.
+```
+
+### [pca9685]
+
+PCA9685 PWM output support. Each instance registers pins named
+`<instance>:0` through `<instance>:15` for output, fan, and other pin
+consumers. All channels on an instance share one PWM frequency.
+
+```
+[pca9685 my_pca9685]
+#i2c_address: 64
+#i2c_mcu:
+#i2c_bus:
+#i2c_software_scl_pin:
+#i2c_software_sda_pin:
+#i2c_speed:
+#   See the "common I2C settings" section for a description of the
+#   above parameters.
+#frequency: 250
+#   PWM frequency in Hz for all channels on this chip. The valid range is
+#   24 through 1526. The default is 250.
+#min_interval: 0.0
+#   Minimum time in seconds between updates to a channel. The default is 0.
 ```
 
 ## Additional servos, buttons, and other pins
@@ -5371,10 +5463,17 @@ jam.
     #y_resolution: 240
     #   Values written to the PAT9125 X and Y resolution registers after a
     #   sensor reset. Each must be from 0 through 255. Defaults are 240.
-    #detection_length: 7.0
-    #   Commanded extrusion without motion before runout. Default 7 mm.
+    #detection_length: 4.0
+    #   Net-forward extrusion evaluation-window length. Retractions and their
+    #   recovery do not consume the window. The value must be from 0.2 through
+    #   20 mm. Default 4 mm; it may be changed at runtime.
     #minimum_motion: 0.1
-    #   Accumulated motion that refreshes detection. Default 0.1 mm.
+    #   Minimum sensor movement used for direction learning. Default 0.1 mm.
+    #minimum_flow: 70.0
+    #   Minimum measured forward sensor motion as a percentage of executed
+    #   net-forward extrusion in each detection_length window. The value must
+    #   be from 1 through 100 percent. Default 70 percent; it may be changed at
+    #   runtime.
     #i2c_address: 0x75
     #i2c_mcu:
     #i2c_bus:
@@ -5386,6 +5485,43 @@ jam.
     #event_delay:
     #pause_delay:
     #   See filament_switch_sensor for the above parameters.
+
+### [fms_recovery]
+
+Measured clog recovery for PAT9125 filament sensors. Recovery must start while
+a print is paused. It retracts before each bounded extrusion attempt, verifies
+raw sensor motion, then cleans and resumes only after measured recovery.
+
+    [fms_recovery]
+    sensors:
+    #   Comma-separated PAT9125 sensor names. This is required.
+    cleaning_gcodes:
+    #   Comma-separated cleaning command or macro names corresponding in order
+    #   to sensors. This is required.
+    #max_attempts: 3
+    #retract_distance: 5.0
+    #extrude_distance: 8.0
+    #   Attempt count and retract/extrude distances in mm.
+    #retract_speed: 10.0
+    #extrude_speed: 1.5
+    #   Retraction and extrusion speeds in mm/s.
+    #check_distance: 0.2
+    #   Extrusion between sensor checks, in mm.
+    #repair_z_hop: 0.2
+    #cleaning_z_hop: 10.0
+    #   Z lifts during attempts and cleaning travel, in mm.
+    #z_speed: 5.0
+    #   Z-hop speed in mm/s.
+    #travel_speed: 100.0
+    #   Paused-position restore speed in mm/s.
+    #pause_x:
+    #pause_y:
+    #   Optional absolute primary-carriage X/Y pause position. Both options
+    #   must be specified together. Recovery parks after the repair Z hop in
+    #   every FLOW mode. NORMAL/BACKUP use the active tool's corresponding
+    #   end park; MIRROR/PARALLEL temporarily separate their X modes and park
+    #   both physical carriages at opposite ends. Failed recovery leaves the
+    #   heads parked.
 
 ### [tsl1401cl_filament_width_sensor]
 
@@ -6147,3 +6283,41 @@ and applies only while a lower-reference command is running.
 after successful calibration. Other optional settings are `lower_position`,
 `travel_speed` (50), `speed` (5),
 `retract_distance` (2), `recovery_release_distance` (10), and `second_speed`.
+
+### [continuous_jog]
+
+Watchdog-controlled continuous manual X, Y, and Z movement.
+
+```
+[continuous_jog]
+#watchdog_timeout: 0.150
+#   Release controller ownership when no keepalive is received for this many
+#   seconds and halt the active drip move. The default is 0.150 seconds.
+#idex_safe_distance: 0.0
+#   On an IDEX printer in NORMAL mode, keep the active carriage at least this
+#   many millimeters from the inactive carriage's actual X position. The
+#   default is zero.
+#jog_xy_accel: 300.0
+#   Maximum acceleration used during X and Y continuous jogging, in mm/s^2.
+#   The default is 300 mm/s^2.
+#jog_z_accel: 300.0
+#   Maximum acceleration used during Z continuous jogging, in mm/s^2. A move
+#   containing Z uses this value. The default is 300 mm/s^2.
+#jog_accel: 300.0
+#   Legacy fallback for either jog acceleration not specified above. Each
+#   effective value is capped by the current toolhead acceleration limit, and
+#   that limit is restored when jogging stops.
+```
+
+## [filament_presets]
+
+Filament material temperature presets that may be consumed by API clients.
+
+```
+[filament_presets]
+presets:
+#   A list of [material, nozzle_temperature, bed_temperature] entries.
+#   Material names must be unique and non-empty. Nozzle temperatures must be
+#   between 0 and 300 Celsius, and bed temperatures between 0 and 130 Celsius.
+#   This parameter must be provided.
+```

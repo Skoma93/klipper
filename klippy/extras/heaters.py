@@ -358,6 +358,10 @@ class PrinterHeaters:
             gcode.respond_raw(self._get_temp(eventtime))
             eventtime = reactor.pause(eventtime + 1.)
     def set_temperature(self, heater, temp, wait=False):
+        modes = self.printer.lookup_object('flow_idex_modes', None)
+        if (modes is not None
+                and modes.defer_nozzle_temperature(heater, temp, wait)):
+            return
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.register_lookahead_callback((lambda pt: None))
         heater.set_temp(temp)

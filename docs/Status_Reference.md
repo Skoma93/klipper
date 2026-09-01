@@ -94,6 +94,19 @@ The following information is available in the `configfile` object
   field (both strings). Additional fields may be available depending
   on the type of warning.
 
+## continuous_extrusion
+
+The following information is available in the `continuous_extrusion` object
+(this object is available if a continuous_extrusion config section is defined):
+
+- `active`: True when a client owns an extrusion session.
+- `direction`: The active direction (`1` for extrusion or `-1` for retraction),
+  or zero when inactive.
+- `speed`: The requested extrusion speed in mm/s.
+- `watchdog_remaining`: Seconds before inactive client ownership expires.
+- `queue_horizon`: Configured maximum queued motion horizon in seconds.
+- `watchdog_timeout`: Configured client ownership timeout in seconds.
+
 ## display_status
 
 The following information is available in the `display_status` object
@@ -219,12 +232,33 @@ The following information is available in
 - `y_counts`: Total signed Y displacement counts since Klipper became ready.
 - `motion`: Total signed displacement in millimeters on the configured axis.
 - `counts_per_mm`: Current configured or runtime-calibrated sensor scale.
+- `detection_length`: Current runtime evaluation-window length in millimeters.
+- `minimum_motion`: Sensor travel required to learn forward direction.
+- `minimum_flow`: Minimum accepted measured flow percentage.
+- `flow_percentage`: Most recently completed window's measured flow percentage,
+  or 100 before the first completed window after reset.
+- `window_extrusion`, `window_motion`: Executed net-forward extrusion and
+  measured forward sensor motion in the current evaluation window.
+- `unmatched_extrusion`: Compatibility field containing current window
+  extrusion minus measured motion, clamped to zero.
+- `motion_direction`: Learned forward sensor-count direction: 1, -1, or 0
+  before sufficient forward movement has been observed.
 - `calibrating`: True between `FMS_SENSOR_CALIBRATE ACTION=START` and a successful
   `ACTION=FINISH`.
 - `product_id`: Two-byte PAT9125 product ID after hardware initialization, or
   null before Klipper is ready.
 - `x_resolution`, `y_resolution`: Resolution-register values programmed during
   sensor initialization.
+
+While paused, the normal PAT9125 missing-motion watchdog is reset. Raw signed
+displacement counters remain active for filament changes and recovery.
+
+## fms_recovery
+
+The `fms_recovery` object reports `state`, `active`, `sensor`, `attempt`,
+`max_attempts`, `attempt_extruded`, `attempt_motion`, `flow_percentage`,
+`missing_distance`, and `error`. State is one of `idle`, `retracting`,
+`extruding`, `cleaning`, or `failed`.
 
 ## firmware_retraction
 
@@ -672,6 +706,35 @@ available in `dual_carriage`:
   values are "INACTIVE" and "PRIMARY" for the primary carriage and "INACTIVE",
   "PRIMARY", "COPY", and "MIRROR" for the dual carriage.
 
+## flow_idex_modes
+
+The following information is available in the `flow_idex_modes` object:
+
+- `mode`: The selected `NORMAL`, `PARALLEL`, `MIRROR`, or `BACKUP` mode.
+- `pending_mode`: A mode queued for activation after complete homing, or null.
+- `active_tool`: The active tool number.
+- `backup_enabled`, `failover_latched`, `failed_tool`: Backup and failover
+  state.
+- `offsets_valid`, `offsets`: Calibration validity and T1-minus-T0 X/Y/Z
+  offsets.
+- `first_layer_height`, `first_layer_active`: First-layer compensation state.
+- `first_layer_z`: The lowest commanded Z observed on a positive XY deposition
+  move for the active first layer, or null before deposition begins. This is
+  used for slicer-independent layer-two detection.
+- `mesh_ready`: Whether a bed mesh is loaded.
+- `adaptive_mesh_active`: True while a print is using a temporary adaptive
+  mesh whose previous mesh will be restored at print termination.
+- `adaptive_nozzle_hold_active`: True while nozzle temperature requests are
+  being deferred until adaptive probing completes.
+- `adaptive_bed_stabilization_time`: Configured delay in seconds after the bed
+  reaches its target and before adaptive probing begins.
+- `adaptive_park_y`: Shared Y position used to park the heads after adaptive
+  probing and before deferred nozzle heating.
+- `base_z_correction`: The shared-Z correction used by the flat-bed fallback.
+- `flow_factors`, `nozzle_gaps`: The latest per-nozzle first-layer values.
+- `recovery_tool`: The tool temporarily selected for isolated FMS repair, or
+  null when recovery routing is inactive.
+
 ## virtual_sdcard
 
 The following information is available in the
@@ -758,3 +821,26 @@ component one could use
 one wanted to find the component associated with the "extruder"
 object, one could use
 `{printer.toolhead.position[printer.toolhead.extra_axes.extruder]}`.
+
+## continuous_jog
+
+The following information is available in the `continuous_jog` object:
+
+- `active`: True when a client owns an active jog session.
+- `direction`: The normalized `[x, y, z]` direction vector.
+- `speed`: The requested toolhead speed in mm/s.
+- `watchdog_remaining`: Seconds until ownership expires without another
+  keepalive.
+- `watchdog_timeout`: Keepalive timeout in seconds.
+- `idex_safe_distance`: Configured NORMAL-mode IDEX carriage separation in mm.
+- `jog_xy_accel`, `jog_z_accel`: Configured XY and Z continuous-jog
+  acceleration limits in mm/s^2.
+- `jog_accel`: Compatibility alias for `jog_xy_accel`.
+
+## filament_presets
+
+The following information is available in the `filament_presets` object:
+
+- `presets`: The configured list of `[material, nozzle_temperature,
+  bed_temperature]` entries. Material names are normalized to uppercase and
+  temperatures are reported in Celsius.

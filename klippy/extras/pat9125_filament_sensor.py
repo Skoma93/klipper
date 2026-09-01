@@ -17,6 +17,10 @@ PRODUCT_ID1 = 0x31
 PRODUCT_ID2 = 0x90
 MOTION_DETECTED = 0x80
 SAMPLE_TIME = .100
+MIN_DETECTION_LENGTH = .2
+MAX_DETECTION_LENGTH = 20.
+MIN_FLOW_PERCENTAGE = 1.
+MAX_FLOW_PERCENTAGE = 100.
 
 
 def _decode_12bit(low, high):
@@ -40,17 +44,26 @@ class PAT9125FilamentSensor:
         self.y_resolution = config.getint(
             'y_resolution', 240, minval=0, maxval=255)
         self.detection_length = config.getfloat(
-            'detection_length', 7., above=0.)
+            'detection_length', 4., minval=MIN_DETECTION_LENGTH,
+            maxval=MAX_DETECTION_LENGTH)
         self.minimum_motion = config.getfloat(
             'minimum_motion', .1, above=0.)
+        self.minimum_flow = config.getfloat(
+            'minimum_flow', 70., minval=MIN_FLOW_PERCENTAGE,
+            maxval=MAX_FLOW_PERCENTAGE)
         self.runout_helper = filament_switch_sensor.RunoutHelper(config)
         self.name = config.get_name().split()[-1]
         self.configfile = self.printer.lookup_object('configfile')
         self.calibration_start = None
         self.product_id = None
         self.extruder = self.estimated_print_time = None
-        self.filament_runout_pos = None
-        self.pending_motion = 0.
+        self.pause_resume = None
+        self.was_paused = False
+        self.pending_motion = self.unmatched_extrusion = 0.
+        self.window_extrusion = self.window_motion = 0.
+        self.flow_percentage = 100.
+        self.motion_direction = 0
+        self.extruder_high_water = None
         self.x_counts = self.y_counts = 0
         self.sample_timer = self.reactor.register_timer(self._sample_sensor)
         self.printer.register_event_handler('klippy:connect',
@@ -60,6 +73,10 @@ class PAT9125FilamentSensor:
             'FMS_SENSOR_CALIBRATE', 'SENSOR', self.name,
             self.cmd_FMS_SENSOR_CALIBRATE,
             desc='Calibrate PAT9125 counts per millimetre')
+        self.gcode.register_mux_command(
+            'SET_FMS_SENSITIVITY', 'SENSOR', self.name,
+            self.cmd_SET_FMS_SENSITIVITY,
+            desc='Set PAT9125 flow threshold and evaluation window')
 
     def _read_reg(self, reg, length=1):
         params = self.i2c.i2c_read([reg], length)
@@ -93,20 +110,31 @@ class PAT9125FilamentSensor:
                              actual_x, actual_y))
         self.product_id = (product_id1, product_id2)
         self.extruder = self.printer.lookup_object(self.extruder_name)
+        self.pause_resume = self.printer.lookup_object('pause_resume', None)
         self.estimated_print_time = (
             self.printer.lookup_object('mcu').estimated_print_time)
-        self._update_filament_runout_pos()
+        self.extruder_high_water = self._get_extruder_pos(
+            self.reactor.monotonic())
+        self.runout_helper.note_filament_present(
+            self.reactor.monotonic(), True)
         self.reactor.update_timer(self.sample_timer, self.reactor.NOW)
+
+    def reset_watchdog(self, eventtime=None):
+        if eventtime is None:
+            eventtime = self.reactor.monotonic()
+        if self.extruder is not None:
+            self.extruder_high_water = self._get_extruder_pos(eventtime)
+        self.pending_motion = self.unmatched_extrusion = 0.
+        self.window_extrusion = self.window_motion = 0.
+        self.flow_percentage = 100.
+        self.runout_helper.note_filament_present(eventtime, True)
+
+    def get_motion_count(self):
+        return (self.x_counts, self.y_counts)[self.axis]
 
     def _get_extruder_pos(self, eventtime):
         print_time = self.estimated_print_time(eventtime)
         return self.extruder.find_past_position(print_time)
-
-    def _update_filament_runout_pos(self, eventtime=None):
-        if eventtime is None:
-            eventtime = self.reactor.monotonic()
-        self.filament_runout_pos = (
-            self._get_extruder_pos(eventtime) + self.detection_length)
 
     def _read_motion(self):
         motion = self._read_reg(REG_MOTION_STATUS, 3)
@@ -120,15 +148,46 @@ class PAT9125FilamentSensor:
         delta_x, delta_y = self._read_motion()
         self.x_counts += delta_x
         self.y_counts += delta_y
-        axis_delta = (delta_x, delta_y)[self.axis]
-        self.pending_motion += abs(axis_delta) / self.counts_per_mm
-        if self.pending_motion >= self.minimum_motion:
-            self.pending_motion = 0.
-            self._update_filament_runout_pos(eventtime)
-            self.runout_helper.note_filament_present(eventtime, True)
+        is_paused = (self.pause_resume is not None
+                     and self.pause_resume.is_paused)
+        if is_paused:
+            self.reset_watchdog(eventtime)
+            self.was_paused = True
+            return eventtime + SAMPLE_TIME
+        if self.was_paused:
+            self.reset_watchdog(eventtime)
+            self.was_paused = False
+            return eventtime + SAMPLE_TIME
         extruder_pos = self._get_extruder_pos(eventtime)
-        self.runout_helper.note_filament_present(
-            eventtime, extruder_pos < self.filament_runout_pos)
+        forward = max(0., extruder_pos - self.extruder_high_water)
+        if forward:
+            self.extruder_high_water = extruder_pos
+        axis_motion = (delta_x, delta_y)[self.axis] / self.counts_per_mm
+        directed_motion = 0.
+        if forward:
+            if self.motion_direction:
+                directed_motion = max(
+                    0., axis_motion * self.motion_direction)
+            else:
+                self.pending_motion += axis_motion
+                if abs(self.pending_motion) >= self.minimum_motion:
+                    self.motion_direction = (
+                        1 if self.pending_motion > 0. else -1)
+                    directed_motion = abs(self.pending_motion)
+                    self.pending_motion = 0.
+        self.window_extrusion += forward
+        if forward:
+            self.window_motion += directed_motion
+        self.unmatched_extrusion = max(
+            0., self.window_extrusion - self.window_motion)
+        if self.window_extrusion >= self.detection_length:
+            self.flow_percentage = min(
+                100., 100. * self.window_motion / self.window_extrusion)
+            is_present = self.flow_percentage >= self.minimum_flow
+            self.window_extrusion = self.window_motion = 0.
+            self.pending_motion = self.unmatched_extrusion = 0.
+            self.runout_helper.note_filament_present(
+                eventtime, is_present)
         return eventtime + SAMPLE_TIME
 
     def get_status(self, eventtime):
@@ -139,12 +198,38 @@ class PAT9125FilamentSensor:
             'motion': (self.x_counts, self.y_counts)[self.axis]
                       / self.counts_per_mm,
             'counts_per_mm': self.counts_per_mm,
+            'detection_length': self.detection_length,
+            'minimum_motion': self.minimum_motion,
+            'minimum_flow': self.minimum_flow,
+            'flow_percentage': self.flow_percentage,
+            'window_extrusion': self.window_extrusion,
+            'window_motion': self.window_motion,
+            'unmatched_extrusion': self.unmatched_extrusion,
+            'motion_direction': self.motion_direction,
             'calibrating': self.calibration_start is not None,
             'product_id': self.product_id,
             'x_resolution': self.x_resolution,
             'y_resolution': self.y_resolution,
         })
         return status
+
+    def cmd_SET_FMS_SENSITIVITY(self, gcmd):
+        flow = gcmd.get_float(
+            'FLOW', None, minval=MIN_FLOW_PERCENTAGE,
+            maxval=MAX_FLOW_PERCENTAGE)
+        distance = gcmd.get_float(
+            'DISTANCE', None, minval=MIN_DETECTION_LENGTH,
+            maxval=MAX_DETECTION_LENGTH)
+        if flow is None and distance is None:
+            raise gcmd.error('Specify FLOW and/or DISTANCE')
+        if flow is not None:
+            self.minimum_flow = flow
+        if distance is not None:
+            self.detection_length = distance
+        self.reset_watchdog()
+        gcmd.respond_info(
+            'PAT9125 %s minimum flow %.1f%% over a %.1fmm window'
+            % (self.name, self.minimum_flow, self.detection_length))
 
     def cmd_FMS_SENSOR_CALIBRATE(self, gcmd):
         action = gcmd.get('ACTION').upper()

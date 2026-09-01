@@ -31,6 +31,13 @@ class HeaterCheck:
         self.last_target = self.goal_temp = self.error = 0.
         self.goal_systime = self.printer.get_reactor().NEVER
         self.check_timer = None
+    def get_max_error(self):
+        return self.max_error
+    def set_max_error(self, max_error):
+        self.max_error = max_error
+        self.approaching_target = self.starting_approach = False
+        self.last_target = self.goal_temp = self.error = 0.
+        self.goal_systime = self.printer.get_reactor().NEVER
     def handle_connect(self):
         if self.printer.get_start_args().get('debugoutput') is not None:
             # Disable verify_heater if outputting to a debug file

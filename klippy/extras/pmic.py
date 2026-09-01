@@ -92,6 +92,12 @@ class PMICChannel:
             self.output.mcu_pin.set_pwm(print_time, value, cycle_time)
     def _print_time(self, eventtime):
         mcu = self.output.get_mcu()
+        # Button/fault callbacks carry the MCU receive timestamp.  By the time
+        # the callback runs in the host thread that timestamp may be too old to
+        # safely schedule an immediate output change.  Use current host time
+        # when it is later so emergency-off writes do not trigger "Timer too
+        # close" on the MCU.
+        eventtime = max(eventtime, self.reactor.monotonic())
         return mcu.estimated_print_time(eventtime + mcu.min_schedule_time())
     def _cancel_retry(self):
         if self.retry_timer is not None:

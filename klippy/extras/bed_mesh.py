@@ -103,8 +103,9 @@ class BedMesh:
         self.base_fade_target = config.getfloat('fade_target', None)
         self.fade_target = 0.
         self.tool_offset = 0.
+        self.mesh_lookup = None
         self.gcode = self.printer.lookup_object('gcode')
-        self.splitter = MoveSplitter(config, self.gcode)
+        self.splitter = MoveSplitter(config, self.gcode, self.calc_z)
         # setup persistent storage
         self.pmgr = ProfileManager(config, self)
         self.save_profile = self.pmgr.save_profile
@@ -134,6 +135,15 @@ class BedMesh:
     def handle_connect(self):
         self.toolhead = self.printer.lookup_object('toolhead')
         self.bmc.print_generated_points(logging.info, truncate=True)
+    def register_mesh_lookup(self, callback):
+        if self.mesh_lookup is not None:
+            raise self.printer.config_error(
+                "bed_mesh: a mesh lookup callback is already registered")
+        self.mesh_lookup = callback
+    def calc_z(self, x, y):
+        if self.mesh_lookup is not None:
+            return self.mesh_lookup(self.z_mesh.calc_z, x, y)
+        return self.z_mesh.calc_z(x, y)
     def set_mesh(self, mesh):
         if mesh is not None and self.fade_end != self.FADE_DISABLE:
             self.log_fade_complete = True
@@ -188,7 +198,7 @@ class BedMesh:
             # return current position minus the current z-adjustment
             cur_pos = self.toolhead.get_position()
             x, y, z = cur_pos[:3]
-            max_adj = self.z_mesh.calc_z(x, y)
+            max_adj = self.calc_z(x, y)
             factor = 1.
             z_adj = max_adj - self.fade_target
             fade_z_pos = z + self.tool_offset
@@ -471,6 +481,13 @@ class BedMeshCalibrate:
             for point in obj["polygon"]:
                 list_of_xs.append(point[0])
                 list_of_ys.append(point[1])
+
+        flow_modes = self.printer.lookup_object('flow_idex_modes', None)
+        if flow_modes is not None:
+            points = flow_modes.expand_adaptive_points(
+                list(zip(list_of_xs, list_of_ys)))
+            list_of_xs = [point[0] for point in points]
+            list_of_ys = [point[1] for point in points]
 
         # Define bounds of adaptive mesh area
         mesh_min = [min(list_of_xs), min(list_of_ys)]
@@ -1255,7 +1272,7 @@ class RapidScanHelper:
 
 
 class MoveSplitter:
-    def __init__(self, config, gcode):
+    def __init__(self, config, gcode, mesh_lookup):
         self.split_delta_z = config.getfloat(
             'split_delta_z', .025, minval=0.01)
         self.move_check_distance = config.getfloat(
@@ -1263,6 +1280,7 @@ class MoveSplitter:
         self.z_mesh = None
         self.fade_offset = 0.
         self.gcode = gcode
+        self.mesh_lookup = mesh_lookup
     def initialize(self, mesh, fade_offset):
         self.z_mesh = mesh
         self.fade_offset = fade_offset
@@ -1278,7 +1296,7 @@ class MoveSplitter:
         self.total_move_length = math.sqrt(sum([d*d for d in axes_d[:3]]))
         self.axis_move = [not isclose(d, 0., abs_tol=1e-10) for d in axes_d]
     def _calc_z_offset(self, pos):
-        z = self.z_mesh.calc_z(pos[0], pos[1])
+        z = self.mesh_lookup(pos[0], pos[1])
         offset = self.fade_offset
         return self.z_factor * (z - offset) + offset
     def _set_next_move(self, distance_from_prev):

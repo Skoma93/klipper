@@ -565,3 +565,44 @@ This will update the mesh configuration and probe points using the
 supplied parameters prior to returning the result.   It is recommended
 to omit mesh parameters unless it is desired to visualize the probe points
 and/or travel path before performing `BED_MESH_CALIBRATE`.
+### Continuous extrusion keepalive
+
+The following endpoint is available when `[continuous_extrusion]` is enabled:
+
+`continuous_extrusion/keepalive`
+
+For example:
+
+```json
+{"id": 123, "method": "continuous_extrusion/keepalive",
+ "params": {"client": "mainsail_123"}}
+```
+
+This refreshes and extends the session previously created by
+`MANUAL_EXTRUDE_START`. Moonraker exposes the endpoint to WebSocket clients as
+`printer.continuous_extrusion.keepalive`. It bypasses the G-Code parser so
+frequent keepalives do not appear in G-Code console history. Klipper retains
+only its normal bounded recent webhook-request buffer for shutdown diagnostics.
+### Continuous XYZ jog
+
+The following endpoints are available when `[continuous_jog]` is enabled:
+
+`continuous_jog/start`
+`continuous_jog/keepalive`
+`continuous_jog/stop`
+
+Start accepts `client`, direction components `x`, `y`, `z`, and `speed` in
+mm/s. Keepalive and stop accept the owning `client`. All three bypass the
+G-Code parser:
+
+```json
+{
+    "id": 123,
+    "method": "continuous_jog/start",
+    "params": {"client": "my_ui_123", "x": 1, "speed": 20}
+}
+```
+
+Moonraker exposes these endpoints to WebSocket clients as
+`printer.continuous_jog.start`, `printer.continuous_jog.keepalive`, and
+`printer.continuous_jog.stop`.

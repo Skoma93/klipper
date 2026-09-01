@@ -17,6 +17,7 @@ class PIDCalibrate:
         heater_name = gcmd.get('HEATER')
         target = gcmd.get_float('TARGET')
         write_file = gcmd.get_int('WRITE_FILE', 0)
+        max_error = gcmd.get_float('MAX_ERROR', None, minval=0.)
         pheaters = self.printer.lookup_object('heaters')
         try:
             heater = pheaters.lookup_heater(heater_name)
@@ -25,12 +26,18 @@ class PIDCalibrate:
         self.printer.lookup_object('toolhead').get_last_move_time()
         calibrate = ControlAutoTune(heater, target)
         old_control = heater.set_control(calibrate)
+        verify = old_max_error = None
+        if max_error is not None:
+            verify = self.printer.lookup_object(
+                'verify_heater %s' % (heater_name,))
+            old_max_error = verify.get_max_error()
+            verify.set_max_error(max_error)
         try:
             pheaters.set_temperature(heater, target, True)
-        except self.printer.command_error as e:
+        finally:
             heater.set_control(old_control)
-            raise
-        heater.set_control(old_control)
+            if verify is not None:
+                verify.set_max_error(old_max_error)
         if write_file:
             calibrate.write_file('/tmp/heattest.txt')
         if calibrate.check_busy(0., 0., 0.):

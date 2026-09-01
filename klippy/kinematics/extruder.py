@@ -142,6 +142,9 @@ class PrinterExtruder:
         self.printer = config.get_printer()
         self.name = config.get_name()
         self.last_position = 0.
+        self.trapq_position = 0.
+        self.extrusion_scale_provider = None
+        self.motion_followers = []
         # Setup hotend heater
         pheaters = self.printer.load_object(config, 'heaters')
         gcode_id = 'T%d' % (extruder_num,)
@@ -203,6 +206,11 @@ class PrinterExtruder:
         return self.trapq
     def get_axis_gcode_id(self):
         return 'E'
+    def set_extrusion_scale_provider(self, provider):
+        self.extrusion_scale_provider = provider
+    def register_motion_follower(self, callback):
+        if callback not in self.motion_followers:
+            self.motion_followers.append(callback)
     def stats(self, eventtime):
         return self.heater.stats(eventtime)
     def check_move(self, move, ea_index):
@@ -239,7 +247,22 @@ class PrinterExtruder:
             return (self.instant_corner_v / abs(diff_r))**2
         return move.max_cruise_v2
     def process_move(self, print_time, move, ea_index):
-        axis_r = move.axes_r[ea_index]
+        scale = 1.
+        if self.extrusion_scale_provider is not None:
+            scale = self.extrusion_scale_provider(move, ea_index)
+        self._append_move(print_time, move, ea_index, scale, False)
+        for callback in self.motion_followers:
+            callback(print_time, move, ea_index)
+    def append_follow_move(self, print_time, move, ea_index, scale):
+        self._append_move(print_time, move, ea_index, scale, True)
+    def _append_move(self, print_time, move, ea_index, scale, following):
+        if (not following
+                and abs(move.start_pos[ea_index] - self.last_position) > 1.e-9):
+            # G92 and extruder activation may change the logical E origin
+            # without moving the stepper. Start the scaled queue from that
+            # new origin, while retaining scaling between contiguous moves.
+            self.trapq_position = move.start_pos[ea_index]
+        axis_r = move.axes_r[ea_index] * scale
         accel = move.accel * axis_r
         start_v = move.start_v * axis_r
         cruise_v = move.cruise_v * axis_r
@@ -249,10 +272,14 @@ class PrinterExtruder:
         # Queue movement (x is extruder movement, y is pressure advance flag)
         self.trapq_append(self.trapq, print_time,
                           move.accel_t, move.cruise_t, move.decel_t,
-                          move.start_pos[ea_index], 0., 0.,
+                          self.trapq_position, 0., 0.,
                           1., can_pressure_advance, 0.,
                           start_v, cruise_v, accel)
-        self.last_position = move.end_pos[ea_index]
+        self.trapq_position += move.axes_d[ea_index] * scale
+        if following:
+            self.last_position += move.axes_d[ea_index]
+        else:
+            self.last_position = move.end_pos[ea_index]
     def find_past_position(self, print_time):
         if self.extruder_stepper is None:
             return 0.
@@ -273,7 +300,16 @@ class PrinterExtruder:
         else:
             extruder = self.printer.lookup_object('toolhead').get_extruder()
         pheaters = self.printer.lookup_object('heaters')
-        pheaters.set_temperature(extruder.get_heater(), temp, wait)
+        targets = [extruder]
+        modes = self.printer.lookup_object('flow_idex_modes', None)
+        if modes is not None and modes.should_heat_both():
+            targets = [self.printer.lookup_object('extruder'),
+                       self.printer.lookup_object('extruder1')]
+        for target in targets:
+            pheaters.set_temperature(target.get_heater(), temp, False)
+        if wait:
+            for target in targets:
+                pheaters.set_temperature(target.get_heater(), temp, True)
     def cmd_M109(self, gcmd):
         # Set Extruder Temperature and Wait
         self.cmd_M104(gcmd, wait=True)

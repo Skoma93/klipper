@@ -64,7 +64,7 @@ class PCA9685Pin:
         v = float(value)
         if self._invert:
             v = 1.0 - v
-        self._chip._set_channel(self._channel, _clamp01(v))
+        self._chip._queue_channel(self._channel, _clamp01(v))
 
     def set_digital(self, print_time, value):
         self.set_pwm(print_time, 1.0 if value else 0.0)
@@ -96,6 +96,8 @@ class PCA9685Chip:
         self._cache = [None] * 16
         self._last_write_time = 0.0
         self._connected = False
+        self._pending = {}
+        self._update_scheduled = False
 
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
         self.printer.register_event_handler("klippy:shutdown", self._handle_shutdown)
@@ -144,6 +146,8 @@ class PCA9685Chip:
             raise pins.error(f"pca9685_pwm init failed: {e}")
 
     def _handle_shutdown(self):
+        self._pending.clear()
+        self._update_scheduled = False
         try:
             if self._connected:
                 for out in self._outputs:
@@ -151,6 +155,22 @@ class PCA9685Chip:
         except Exception:
             pass
         self._connected = False
+
+    def _queue_channel(self, ch: int, duty: float):
+        if not self._connected:
+            return
+        self._pending[ch] = duty
+        if self._update_scheduled:
+            return
+        self._update_scheduled = True
+        self.reactor.register_callback(self._flush_pending)
+
+    def _flush_pending(self, eventtime):
+        self._update_scheduled = False
+        pending = self._pending
+        self._pending = {}
+        for ch, duty in pending.items():
+            self._set_channel(ch, duty)
 
     def _set_channel(self, ch: int, duty: float):
         if not self._connected:
